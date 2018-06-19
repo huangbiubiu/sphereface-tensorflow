@@ -5,12 +5,16 @@ import tensorflow as tf
 from datasets.preprocess import image_preprocess
 
 
-def load_data(data_dir, epoch_num, batch_size):
+def load_data(data_dir, is_training, epoch_num, batch_size):
     # Dimensions of the images in the CIFAR-10 dataset.
     # See http://www.cs.toronto.edu/~kriz/cifar.html for a description of the
     # input format.
-    filenames = [os.path.join(data_dir, 'data_batch_%d.bin' % i)
-                 for i in range(1, 6)]
+
+    if is_training:
+        filenames = [os.path.join(data_dir, 'data_batch_%d.bin' % i)
+                     for i in range(1, 6)]
+    else:
+        filenames = [os.path.join(data_dir, 'test_batch.bin')]
     for f in filenames:
         if not tf.gfile.Exists(f):
             raise ValueError('Failed to find file: ' + f)
@@ -55,7 +59,10 @@ def load_data(data_dir, epoch_num, batch_size):
     dataset = dataset.map(decode_data).map(lambda image, label: image_preprocess(image, label))
 
     # Shuffle, repeat, and batch the examples.
-    dataset = dataset.shuffle(1000).repeat(epoch_num).batch(batch_size)
+    if is_training:
+        dataset = dataset.shuffle(1000).repeat(epoch_num).batch(batch_size)
+    else:
+        dataset = dataset.shuffle(1000).batch(batch_size)
 
     # Return the read end of the pipeline.
     return dataset.make_one_shot_iterator().get_next()

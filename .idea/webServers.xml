@@ -7,6 +7,14 @@
           <option name="port" value="22" />
         </fileTransfer>
       </webServer>
+      <webServer id="bfe13082-ccb3-4082-a17b-024f5995b473" name="eversec" url="http://192.168.200.220">
+        <fileTransfer host="192.168.200.220" port="22" accessType="SFTP">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" />
+          </advancedOptions>
+          <option name="port" value="22" />
+        </fileTransfer>
+      </webServer>
     </option>
   </component>
 </project>
