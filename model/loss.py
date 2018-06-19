@@ -13,3 +13,8 @@ def softmax_loss(logits, labels):
         loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=labels, logits=logits)
 
         return tf.reduce_mean(loss)
+
+
+
+
+pass
