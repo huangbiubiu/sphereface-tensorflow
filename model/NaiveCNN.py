@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import model.layers
 from model.NerualNetwork import NerualNetwork
 
 import tensorflow as tf
@@ -27,7 +28,8 @@ class NaiveCNN(NerualNetwork):
         # features = tf.reshape(images, [images.get_shape().as_list()[0], -1], name="flatten")
         features = tf.layers.Flatten()(images)
         features = tf.layers.dense(features, 256, activation=tf.nn.relu, name="local1")
-        logits = tf.layers.dense(features, num_class, name="output")
+        # logits = tf.layers.dense(features, num_class, name="output")
+        logits = model.layers.a_softmax(features, num_class, m=3, global_steps=param['global_steps'])
         tf.summary.histogram("output", logits)
 
         return logits
