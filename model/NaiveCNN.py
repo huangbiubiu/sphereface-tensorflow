@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
+from model.NerualNetwork import NerualNetwork
 
 import tensorflow as tf
 
-from model.NerualNetwork import NerualNetwork
-
 
 class NaiveCNN(NerualNetwork):
-
-    def inference(self, images, num_class):
+    def inference(self, images, num_class, param):
         tf.summary.image("input_image", images)
 
         images = tf.layers.conv2d(images,
@@ -18,7 +16,6 @@ class NaiveCNN(NerualNetwork):
                                   name='conv1')
         images = tf.layers.max_pooling2d(images, [3, 3], [1, 1], name='pool1')
         images = tf.layers.batch_normalization(images, name='norm1')
-        tf.summary.image("conv1", images)
 
         images = tf.layers.conv2d(images,
                                   filters=32,
@@ -26,7 +23,6 @@ class NaiveCNN(NerualNetwork):
                                   padding='same', name='conv2')
         images = tf.layers.max_pooling2d(images, [2, 2], [1, 1], name='pool2')
         images = tf.layers.batch_normalization(images, name='norm2')
-        tf.summary.image("conv2", images)
 
         # features = tf.reshape(images, [images.get_shape().as_list()[0], -1], name="flatten")
         features = tf.layers.Flatten()(images)

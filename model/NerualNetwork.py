@@ -8,5 +8,5 @@ class NerualNetwork(object):
     __metaclass__ = ABCMeta
 
     @abstractmethod
-    def inference(self, images, num_class):
+    def inference(self, images, num_class, param):
         pass
