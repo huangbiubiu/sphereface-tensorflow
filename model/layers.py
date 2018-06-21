@@ -44,7 +44,7 @@ def a_softmax(features, class_num, m, global_steps, base=1000, gamma=0.12, power
         logits = tf.div(
             (tf.matmul(x_norm, w_norm, name='xw_norm_multiply') * tf.cos(theta * m, name='cos_m_theta') + lba * xw),
             1 + lba, name='logits')
-        tf.summary.scalar("a-softmax\lambda", lba)
+        tf.summary.scalar("a-softmax_lambda", lba)
 
         # logits = tf.Print(logits, [theta], "logits=", summarize=100, name='print_logits')
         return logits

@@ -8,7 +8,7 @@ from model.NerualNetwork import NerualNetwork
 
 class SphereCNN(NerualNetwork):
     @staticmethod
-    def __res_block(data_in, kernel_size: int, filters: int, name: str, activation_name='relu'):
+    def __res_block(data_in, kernel_size: int, filters: int, name: str, activation_name='prelu'):
         def prelu(_x, scope=None):
             """parametric ReLU activation"""
             # reference https://stackoverflow.com/a/44947501/5634636
