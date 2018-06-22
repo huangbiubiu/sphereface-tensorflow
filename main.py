@@ -44,32 +44,7 @@ def build_graph(dataset_path: str,
 
         train_op = tf.train.AdamOptimizer(name='optimizer').minimize(loss, global_step=global_step)
 
-        train_acc = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(label, axis=1), tf.argmax(logits, axis=1)), tf.float32))
-
-        eval_acc, eval_acc_op = tf.metrics.accuracy(tf.argmax(label, axis=1), tf.argmax(logits, axis=1))
-
-        # tf.summary.scalar("eval/acc", eval_acc)
-
-        # if is_training:
-        #     acc = tf.reduce_mean(
-        #         tf.cast(tf.equal(tf.argmax(label, axis=1), tf.argmax(logits, axis=1)), tf.float32))
-        #     acc_op = None
-        # else:
-        #     acc, acc_op = tf.metrics.accuracy(tf.argmax(label, axis=1), tf.argmax(logits, axis=1))
-        # tf.summary.scalar("acc", acc)
-
-        # acc, acc_op = tf.cond(tf.constant(is_training), lambda: (
-        #     tf.reduce_mean(tf.cast(tf.equal(tf.argmax(label, axis=1), tf.argmax(logits, axis=1)), tf.float32)), None),
-        #                       lambda: tf.metrics.accuracy(tf.argmax(label, axis=1), tf.argmax(logits, axis=1)))
-
         summary_op = tf.summary.merge_all()
-
-        train_acc_summary = tf.summary.scalar("acc", train_acc)
-        eval_acc_summary = tf.summary.scalar("acc", eval_acc)
-        if is_training:
-            acc_summary = train_acc_summary
-        else:
-            acc_summary = eval_acc_summary
 
         saver = tf.train.Saver()
 
@@ -80,10 +55,21 @@ def build_graph(dataset_path: str,
             saver.restore(sess, latest_ckpt)
         else:
             sess.run(tf.global_variables_initializer())
+
+        # add accuracy node
+        with tf.name_scope("accuracy"):
+            if is_training:
+                acc = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(label, axis=1), tf.argmax(logits, axis=1)), tf.float32))
+                acc_op = None
+            else:
+                acc, acc_op = tf.metrics.accuracy(tf.argmax(label, axis=1), tf.argmax(logits, axis=1))
+            tf.summary.scalar("acc", acc)
+            acc_summary = tf.summary.merge_all()
+
         sess.run(tf.local_variables_initializer())
 
         # return train_op, acc, acc_op, loss, global_step, summary_op, saver
-        return train_op, train_acc, eval_acc, eval_acc_op, loss, global_step, summary_op, saver, acc_summary
+        return train_op, acc, acc_op, loss, global_step, summary_op, saver, acc_summary
 
 
 def train_and_evaluate(dataset_path,
@@ -100,7 +86,7 @@ def train_and_evaluate(dataset_path,
         tf.reset_default_graph()
         with tf.Session(config=sess_config) as sess:
             # build training graph
-            train_op, train_acc, _, _, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
+            train_op, train_acc, _, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
                 dataset_path=dataset_path,
                 is_training=True,
                 epoch_num=epoch_num,
@@ -138,7 +124,7 @@ def train_and_evaluate(dataset_path,
                        cnn_param=cnn_param,
                        batch_size=batch_size,
                        sess_config=sess_config,
-                       logdir=logdir, step=step)
+                       logdir=logdir)
         if is_final_eval:
             tf.logging.info("--------Final Evaluation--------")
             tf.logging.info(f"Accuracy: {acc}")
@@ -150,13 +136,13 @@ def evaluate(dataset_path,
              cnn_param,
              batch_size,
              sess_config,
-             logdir, step):
+             logdir):
     tf.reset_default_graph()
     with tf.Session(config=sess_config) as sess:
         tf.logging.info("--------Start Evaluation--------")
         tf.logging.info("loading evaluation graph")
 
-        train_op, _, eval_acc, acc_op, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
+        train_op, eval_acc, acc_op, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
             dataset_path=dataset_path,
             is_training=False,
             epoch_num=1,
@@ -170,11 +156,15 @@ def evaluate(dataset_path,
 
         while True:
             try:
-                loss_value, acc, _, summary, acc_summary = sess.run(
-                    [loss, eval_acc, acc_op, summary_op, acc_summary_op])
+                loss_value, acc, _, summary, acc_summary, step = sess.run(
+                    [loss, eval_acc, acc_op, summary_op, acc_summary_op, global_step])
             except tf.errors.OutOfRangeError:
                 eval_writer.add_summary(summary, global_step=step)
                 eval_writer.add_summary(acc_summary, global_step=step)
+
+                # make sure all summaries are written to disk
+                eval_writer.flush()
+                eval_writer.close()
 
                 tf.logging.info("--------Evaluation Competed--------")
                 return acc
