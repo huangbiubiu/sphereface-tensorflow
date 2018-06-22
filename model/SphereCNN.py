@@ -71,7 +71,13 @@ class SphereCNN(NerualNetwork):
 
         # output layer
         # logits = tf.layers.dense(features, num_class, name="output")
-        logits = model.layers.a_softmax(features, num_class, m=3, global_steps=global_steps)  # TODO set lambda
+        # logits = model.layers.a_softmax(features, num_class, m=3, global_steps=global_steps)
+        if param['softmax'] == 'vanilla':
+            logits = tf.layers.dense(features, num_class, name="output")
+        elif param['softmax'] == 'a-softmax':
+            logits = model.layers.a_softmax(features, num_class, m=3, global_steps=param['global_steps'])
+        else:
+            raise ValueError(f"Softmax {param['softmax']} is not supported.")
         tf.summary.histogram("output", logits)
 
         return logits

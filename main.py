@@ -16,6 +16,8 @@ def parse_arg(argv) -> argparse.ArgumentParser:
     parser.add_argument('--dataset_path', type=str, help='the path of dataset')
     parser.add_argument('--batch_size', type=int, default=128, help='the path of dataset')
     parser.add_argument('--log_dir', type=str, help='log output dir')
+    parser.add_argument('--softmax_type', type=str, choices=['vanilla', 'a-softmax'], help='softmax layer type')
+    parser.add_argument('--cnn_model', type=str, choices=['naive', 'a-softmax'], help='cnn_structure')
 
     args = parser.parse_args(argv[1:])
 
@@ -28,6 +30,7 @@ def build_graph(dataset_path: str,
                 epoch_num: int,
                 batch_size: int,
                 cnn_model: NerualNetwork,
+                cnn_param: dict,
                 sess: tf.Session):
     with sess.graph.as_default():
         global_step = tf.train.get_or_create_global_step(graph=sess.graph)
@@ -35,7 +38,7 @@ def build_graph(dataset_path: str,
         image, label = load_data(dataset_path, is_training, epoch_num, batch_size)
 
         model = cnn_model()
-        logits = model.inference(image, 10, param={'global_steps': global_step})
+        logits = model.inference(image, 10, param={**cnn_param, **{'global_steps': global_step}})
         loss = softmax_loss(logits, label)
         tf.summary.scalar("loss", loss)
 
@@ -87,6 +90,7 @@ def train_and_evaluate(dataset_path,
                        epoch_num,
                        batch_size,
                        cnn_model,
+                       cnn_param,
                        sess_config,
                        logdir,
                        eval_every_step=1000):
@@ -102,6 +106,7 @@ def train_and_evaluate(dataset_path,
                 epoch_num=epoch_num,
                 batch_size=batch_size,
                 cnn_model=cnn_model,
+                cnn_param=cnn_param,
                 sess=sess,
                 log_dir=logdir)
             train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'), sess.graph)
@@ -130,6 +135,7 @@ def train_and_evaluate(dataset_path,
 
         acc = evaluate(dataset_path=dataset_path,
                        cnn_model=cnn_model,
+                       cnn_param=cnn_param,
                        batch_size=batch_size,
                        sess_config=sess_config,
                        logdir=logdir, step=step)
@@ -141,6 +147,7 @@ def train_and_evaluate(dataset_path,
 
 def evaluate(dataset_path,
              cnn_model,
+             cnn_param,
              batch_size,
              sess_config,
              logdir, step):
@@ -155,6 +162,7 @@ def evaluate(dataset_path,
             epoch_num=1,
             batch_size=batch_size,
             cnn_model=cnn_model,
+            cnn_param=cnn_param,
             sess=sess,
             log_dir=logdir)
 
@@ -162,7 +170,8 @@ def evaluate(dataset_path,
 
         while True:
             try:
-                loss_value, acc, _, summary, acc_summary = sess.run([loss, eval_acc, acc_op, summary_op, acc_summary_op])
+                loss_value, acc, _, summary, acc_summary = sess.run(
+                    [loss, eval_acc, acc_op, summary_op, acc_summary_op])
             except tf.errors.OutOfRangeError:
                 eval_writer.add_summary(summary, global_step=step)
                 eval_writer.add_summary(acc_summary, global_step=step)
@@ -178,10 +187,13 @@ def main(argv):
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
 
+    cnn_model = NaiveCNN if args.cnn_model == 'naive' else SphereCNN
+
     train_and_evaluate(dataset_path=args.dataset_path,
                        epoch_num=None,
                        batch_size=args.batch_size,
-                       cnn_model=NaiveCNN,
+                       cnn_model=cnn_model,
+                       cnn_param={'softmax': args.softmax_type},
                        sess_config=config,
                        logdir=args.log_dir,
                        eval_every_step=100)
