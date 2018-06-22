@@ -110,7 +110,7 @@ def train_and_evaluate(dataset_path,
                 sess=sess,
                 log_dir=logdir)
             train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'), sess.graph)
-            while training_step < eval_every_step:
+            while training_step <= eval_every_step:
                 try:
                     training_step += 1
 
@@ -180,8 +180,17 @@ def evaluate(dataset_path,
                 return acc
 
 
+def save_args(args, path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+    with open(os.path.join(path, 'arguments.txt'), 'a', encoding='utf-8') as file:
+        for arg in vars(args):
+            file.write(f"{arg}: {getattr(args, arg)}\n")
+
+
 def main(argv):
     args = parse_arg(argv)
+    save_args(args, args.log_dir)
 
     # Set GPU configuration
     config = tf.ConfigProto()
@@ -196,7 +205,7 @@ def main(argv):
                        cnn_param={'softmax': args.softmax_type},
                        sess_config=config,
                        logdir=args.log_dir,
-                       eval_every_step=100)
+                       eval_every_step=1000)
 
 
 if __name__ == '__main__':

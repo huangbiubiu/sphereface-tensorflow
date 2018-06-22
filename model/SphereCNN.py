@@ -8,7 +8,13 @@ from model.NerualNetwork import NerualNetwork
 
 class SphereCNN(NerualNetwork):
     @staticmethod
-    def __res_block(data_in, kernel_size: int, filters: int, name: str, activation_name='prelu'):
+    def __res_block(data_in,
+                    kernel_size: int,
+                    filters: int,
+                    name: str,
+                    strides=1,
+                    conv_first=True,
+                    activation_name='prelu'):
         def prelu(_x, scope=None):
             """parametric ReLU activation"""
             # reference https://stackoverflow.com/a/44947501/5634636
@@ -25,14 +31,16 @@ class SphereCNN(NerualNetwork):
         else:
             raise ValueError(f"Activation {activation_name} is not supported.")
 
-
-
-        conv1 = tf.layers.conv2d(data_in,
-                                 filters=filters,
-                                 kernel_size=[kernel_size, kernel_size],
-                                 padding='SAME',
-                                 activation=activation,
-                                 name=name + '_1')
+        if conv_first:
+            conv1 = tf.layers.conv2d(data_in,
+                                     filters=filters,
+                                     kernel_size=[kernel_size, kernel_size],
+                                     padding='SAME',
+                                     strides=(strides, strides),
+                                     activation=activation,
+                                     name=name + '_1')
+        else:
+            conv1 = data_in
         conv2 = tf.layers.conv2d(conv1,
                                  filters=filters,
                                  kernel_size=[kernel_size, kernel_size],
@@ -58,15 +66,21 @@ class SphereCNN(NerualNetwork):
 
         tf.summary.image("input_image", images)
 
-        feature_map1 = self.__res_block(images, kernel_size=3, filters=64, name='conv1')
-        feature_map2 = self.__res_block(feature_map1, kernel_size=3, filters=128, name='conv2')
-        feature_map3 = self.__res_block(feature_map2, kernel_size=3, filters=256, name='conv3')
-        feature_map4 = self.__res_block(feature_map3, kernel_size=3, filters=256, name='conv4')
-        feature_map5 = self.__res_block(feature_map4, kernel_size=3, filters=256, name='conv5')
-        feature_map6 = self.__res_block(feature_map5, kernel_size=3, filters=512, name='conv6')
+        feature_map1 = self.__res_block(images, kernel_size=3, filters=64, strides=2, conv_first=True,
+                                        name='conv1')
+        feature_map2 = self.__res_block(feature_map1, kernel_size=3, filters=128, strides=2, conv_first=True,
+                                        name='conv2')
+        feature_map3 = self.__res_block(feature_map2, kernel_size=3, filters=256, name='conv3', conv_first=False)
+        feature_map4 = self.__res_block(feature_map3, kernel_size=3, filters=256, name='conv4', conv_first=True,
+                                        strides=2)
+        feature_map5 = self.__res_block(feature_map4, kernel_size=3, filters=256, name='conv5', conv_first=False)
+        feature_map6 = self.__res_block(feature_map5, kernel_size=3, filters=512, name='conv6', conv_first=False)
+        feature_map7 = self.__res_block(feature_map6, kernel_size=3, filters=512, name='conv6', conv_first=False)
+        feature_map8 = self.__res_block(feature_map7, kernel_size=3, filters=512, name='conv6', conv_first=True,
+                                        strides=2)
 
         # features = tf.reshape(images, [images.get_shape().as_list()[0], -1], name="flatten")
-        features = tf.layers.Flatten()(feature_map6)
+        features = tf.layers.Flatten()(feature_map8)
         features = tf.layers.dense(features, 512, activation=None, name="fc5")
 
         # output layer
@@ -75,7 +89,7 @@ class SphereCNN(NerualNetwork):
         if param['softmax'] == 'vanilla':
             logits = tf.layers.dense(features, num_class, name="output")
         elif param['softmax'] == 'a-softmax':
-            logits = model.layers.a_softmax(features, num_class, m=3, global_steps=param['global_steps'])
+            logits = model.layers.a_softmax(features, num_class, m=3, global_steps=global_steps)
         else:
             raise ValueError(f"Softmax {param['softmax']} is not supported.")
         tf.summary.histogram("output", logits)
