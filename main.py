@@ -183,7 +183,7 @@ def evaluate(dataset_path,
 def save_args(args, path):
     if not os.path.exists(path):
         os.makedirs(path)
-    with open(os.path.join(path, 'arguments.txt'), 'a', encoding='utf-8') as file:
+    with open(os.path.join(path, 'arguments.txt'), 'w', encoding='utf-8') as file:
         for arg in vars(args):
             file.write(f"{arg}: {getattr(args, arg)}\n")
 

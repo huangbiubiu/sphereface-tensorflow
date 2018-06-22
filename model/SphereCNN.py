@@ -67,16 +67,16 @@ class SphereCNN(NerualNetwork):
         tf.summary.image("input_image", images)
 
         feature_map1 = self.__res_block(images, kernel_size=3, filters=64, strides=2, conv_first=True,
-                                        name='conv1')
+                                        name='conv1_1')
         feature_map2 = self.__res_block(feature_map1, kernel_size=3, filters=128, strides=2, conv_first=True,
-                                        name='conv2')
-        feature_map3 = self.__res_block(feature_map2, kernel_size=3, filters=256, name='conv3', conv_first=False)
-        feature_map4 = self.__res_block(feature_map3, kernel_size=3, filters=256, name='conv4', conv_first=True,
+                                        name='conv2_1')
+        feature_map3 = self.__res_block(feature_map2, kernel_size=3, filters=128, name='conv2_2', conv_first=False)
+        feature_map4 = self.__res_block(feature_map3, kernel_size=3, filters=256, name='conv3_1', conv_first=True,
                                         strides=2)
-        feature_map5 = self.__res_block(feature_map4, kernel_size=3, filters=256, name='conv5', conv_first=False)
-        feature_map6 = self.__res_block(feature_map5, kernel_size=3, filters=512, name='conv6', conv_first=False)
-        feature_map7 = self.__res_block(feature_map6, kernel_size=3, filters=512, name='conv6', conv_first=False)
-        feature_map8 = self.__res_block(feature_map7, kernel_size=3, filters=512, name='conv6', conv_first=True,
+        feature_map5 = self.__res_block(feature_map4, kernel_size=3, filters=256, name='conv3_2', conv_first=False)
+        feature_map6 = self.__res_block(feature_map5, kernel_size=3, filters=256, name='conv3_3', conv_first=False)
+        feature_map7 = self.__res_block(feature_map6, kernel_size=3, filters=256, name='conv3_4', conv_first=False)
+        feature_map8 = self.__res_block(feature_map7, kernel_size=3, filters=512, name='conv4', conv_first=True,
                                         strides=2)
 
         # features = tf.reshape(images, [images.get_shape().as_list()[0], -1], name="flatten")
