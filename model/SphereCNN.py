@@ -66,6 +66,11 @@ class SphereCNN(NerualNetwork):
 
         tf.summary.image("input_image", images)
 
+        image_size = self.get_image_size(param)
+        images = tf.image.resize_images(images, image_size)
+        # images = images[:, :, :, :3]  # discard the alpha channel
+        # images.set_shape((None, *image_size, 3))
+
         feature_map1 = self.__res_block(images, kernel_size=3, filters=64, strides=2, conv_first=True,
                                         name='conv1_1')
         feature_map2 = self.__res_block(feature_map1, kernel_size=3, filters=128, strides=2, conv_first=True,

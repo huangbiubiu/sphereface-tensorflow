@@ -9,6 +9,9 @@ class NaiveCNN(NerualNetwork):
     def inference(self, images, num_class, param):
         tf.summary.image("input_image", images)
 
+        image_size = self.get_image_size(param)
+        images = tf.image.resize_images(images, image_size)
+
         images = tf.layers.conv2d(images,
                                   filters=32,
                                   kernel_size=[5, 5],

@@ -4,7 +4,7 @@ import time
 
 import tensorflow as tf
 
-from datasets.cifar10 import load_data
+from datasets.webface import load_data
 from model.NaiveCNN import NaiveCNN
 from model.NerualNetwork import NerualNetwork
 from model.SphereCNN import SphereCNN
@@ -35,10 +35,13 @@ def build_graph(dataset_path: str,
     with sess.graph.as_default():
         global_step = tf.train.get_or_create_global_step(graph=sess.graph)
 
-        image, label = load_data(dataset_path, is_training, epoch_num, batch_size)
+        dataset, num_class = load_data(dataset_path, is_training, epoch_num, batch_size)
+        image, label = dataset
 
         model = cnn_model()
-        logits = model.inference(image, 10, param={**cnn_param, **{'global_steps': global_step}})
+        logits = model.inference(image,
+                                 num_class,
+                                 param={**cnn_param, **{'global_steps': global_step, 'image_size': 100}})
         loss = softmax_loss(logits, label)
         tf.summary.scalar("loss", loss)
 
@@ -137,37 +140,39 @@ def evaluate(dataset_path,
              batch_size,
              sess_config,
              logdir):
-    tf.reset_default_graph()
-    with tf.Session(config=sess_config) as sess:
-        tf.logging.info("--------Start Evaluation--------")
-        tf.logging.info("loading evaluation graph")
-
-        train_op, eval_acc, acc_op, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
-            dataset_path=dataset_path,
-            is_training=False,
-            epoch_num=1,
-            batch_size=batch_size,
-            cnn_model=cnn_model,
-            cnn_param=cnn_param,
-            sess=sess,
-            log_dir=logdir)
-
-        eval_writer = tf.summary.FileWriter(os.path.join(logdir, 'eval'), sess.graph)
-
-        while True:
-            try:
-                loss_value, acc, _, summary, acc_summary, step = sess.run(
-                    [loss, eval_acc, acc_op, summary_op, acc_summary_op, global_step])
-            except tf.errors.OutOfRangeError:
-                eval_writer.add_summary(summary, global_step=step)
-                eval_writer.add_summary(acc_summary, global_step=step)
-
-                # make sure all summaries are written to disk
-                eval_writer.flush()
-                eval_writer.close()
-
-                tf.logging.info("--------Evaluation Competed--------")
-                return acc
+    # tf.reset_default_graph()
+    # with tf.Session(config=sess_config) as sess:
+    #     tf.logging.info("--------Start Evaluation--------")
+    #     tf.logging.info("loading evaluation graph")
+    #
+    #     train_op, eval_acc, acc_op, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
+    #         dataset_path=dataset_path,
+    #         is_training=False,
+    #         epoch_num=1,
+    #         batch_size=batch_size,
+    #         cnn_model=cnn_model,
+    #         cnn_param=cnn_param,
+    #         sess=sess,
+    #         log_dir=logdir)
+    #
+    #     eval_writer = tf.summary.FileWriter(os.path.join(logdir, 'eval'), sess.graph)
+    #
+    #     while True:
+    #         try:
+    #             loss_value, acc, _, summary, acc_summary, step = sess.run(
+    #                 [loss, eval_acc, acc_op, summary_op, acc_summary_op, global_step])
+    #         except tf.errors.OutOfRangeError:
+    #             eval_writer.add_summary(summary, global_step=step)
+    #             eval_writer.add_summary(acc_summary, global_step=step)
+    #
+    #             # make sure all summaries are written to disk
+    #             eval_writer.flush()
+    #             eval_writer.close()
+    #
+    #             tf.logging.info("--------Evaluation Competed--------")
+    #             return acc
+    tf.logging.info("EVALUATION IS NOT IMPLEMENTED.")
+    return 0  # TODO implement evaluation code
 
 
 def save_args(args, path):
