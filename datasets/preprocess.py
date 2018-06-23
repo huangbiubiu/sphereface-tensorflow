@@ -29,4 +29,5 @@ def image_preprocess(image, label, image_size=24):
 
         # Subtract off the mean and divide by the variance of the pixels.
         float_image = tf.image.per_image_standardization(distorted_image)
+
         return float_image, label
