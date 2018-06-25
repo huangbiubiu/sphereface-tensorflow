@@ -7,9 +7,14 @@ import tensorflow as tf
 def list_images(data_dir, cls_name, cls2idx):
     cls_path = os.path.join(data_dir, cls_name)
     images = os.listdir(cls_path)
-    images_data = list(
-        map(lambda img_file_name: (os.path.join(cls_path, img_file_name), cls2idx[cls_name]), images))
 
+    if cls2idx is not None:
+
+        images_data = list(
+            map(lambda img_file_name: (os.path.join(cls_path, img_file_name), cls2idx[cls_name]), images))
+    else:
+        images_data = list(
+            map(lambda img_file_name: (os.path.join(cls_path, img_file_name), cls_name), images))
     return images_data
 
 

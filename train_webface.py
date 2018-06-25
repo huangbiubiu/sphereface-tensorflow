@@ -49,7 +49,7 @@ def build_graph(dataset_path: str,
 
         summary_op = tf.summary.merge_all()
 
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(max_to_keep=5)
 
         # initialize variables
         latest_ckpt = tf.train.latest_checkpoint(os.path.expanduser(log_dir))
