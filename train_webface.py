@@ -15,6 +15,12 @@ def parse_arg(argv) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, help='the path of dataset')
     parser.add_argument('--batch_size', type=int, default=128, help='the path of dataset')
+
+    parser.add_argument('--fail_path', type=str, help='the path of images which failed to detect faces')
+    parser.add_argument('--bounding_box_path', type=str, help='the path of face bounding boxes')
+
+    parser.add_argument('--margin', type=int, default=44, help='cropping margin')
+
     parser.add_argument('--log_dir', type=str, help='log output dir')
     parser.add_argument('--softmax_type', type=str, choices=['vanilla', 'a-softmax'], help='softmax layer type')
     parser.add_argument('--cnn_model', type=str, choices=['naive', 'a-softmax'], help='cnn_structure')
@@ -31,11 +37,12 @@ def build_graph(dataset_path: str,
                 batch_size: int,
                 cnn_model: NerualNetwork.__class__,
                 cnn_param: dict,
-                sess: tf.Session):
+                sess: tf.Session,
+                data_param: dict):
     with sess.graph.as_default():
         global_step = tf.train.get_or_create_global_step(graph=sess.graph)
 
-        dataset, num_class = load_data(dataset_path, is_training, epoch_num, batch_size)
+        dataset, num_class = load_data(dataset_path, is_training, epoch_num, batch_size, data_param)
         image, label = dataset
 
         model = cnn_model()
@@ -82,6 +89,7 @@ def train_and_evaluate(dataset_path,
                        cnn_param,
                        sess_config,
                        logdir,
+                       args,
                        eval_every_step=1000):
     is_final_eval = False
     while not is_final_eval:
@@ -97,7 +105,10 @@ def train_and_evaluate(dataset_path,
                 cnn_model=cnn_model,
                 cnn_param=cnn_param,
                 sess=sess,
-                log_dir=logdir)
+                log_dir=logdir,
+                data_param={'fail_path': args.fail_path,
+                            'bounding_boxes': args.bounding_box_path,
+                            'margin': args.margin})
             train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'), sess.graph)
             while training_step <= eval_every_step:
                 try:
@@ -171,7 +182,7 @@ def evaluate(dataset_path,
     #
     #             tf.logging.info("--------Evaluation Competed--------")
     #             return acc
-    tf.logging.info("EVALUATION IS NOT IMPLEMENTED.")
+    tf.logging.warn("EVALUATION IS NOT IMPLEMENTED.")
     return 0  # TODO implement evaluation code
 
 
@@ -200,7 +211,8 @@ def main(argv):
                        cnn_param={'softmax': args.softmax_type},
                        sess_config=config,
                        logdir=args.log_dir,
-                       eval_every_step=1000)
+                       eval_every_step=1000,
+                       args=args)
 
 
 if __name__ == '__main__':
