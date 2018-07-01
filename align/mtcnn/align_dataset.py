@@ -47,9 +47,9 @@ def align(image, mtcnn_param):
     onet = mtcnn_param['onet']
 
     image = np.stack((image, image, image), axis=2)
-    bounding_boxes, _ = detect_face.detect_face(image, minsize, pnet, rnet, onet, threshold, factor)
+    bounding_boxes, key_points = detect_face.detect_face(image, minsize, pnet, rnet, onet, threshold, factor)
 
-    return bounding_boxes.tolist()
+    return bounding_boxes.tolist(), key_points.tolist()
 
 
 def flatten(l: list) -> list:
@@ -76,14 +76,14 @@ def main(args):
         fail_count = 0
         for image_path, _ in dataset:
             image = skimage.io.imread(image_path)
-            bounding_boxes = align(image, mtcnn_param)
+            bounding_boxes, key_points = align(image, mtcnn_param)
 
             count += 1
             if len(bounding_boxes) == 0:
                 fail_count += 1
                 fail_file.write(f"{image_path}\n")
             else:
-                info = f"{image_path},{','.join(flatten(bounding_boxes))}\n"
+                info = f"{image_path},{','.join(flatten(bounding_boxes))}, {','.join(flatten(key_points))}\n"
                 text_file.write(info)
 
             progress(count, len(dataset),

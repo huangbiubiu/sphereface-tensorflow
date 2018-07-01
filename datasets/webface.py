@@ -43,6 +43,7 @@ def get_bounding_boxes(path, margin=44, img_size=None):
     with open(path, 'r') as file:
         bb_reader = csv.reader(file, delimiter=',')
         for row in bb_reader:
+            # bounding box
             det = [float(item) for item in row[1:5]]
             x1 = np.maximum(det[0] - margin / 2, 0)
             y1 = np.maximum(det[1] - margin / 2, 0)
@@ -56,7 +57,10 @@ def get_bounding_boxes(path, margin=44, img_size=None):
             #     target_width)
             bb = (int(y1), int(x1), int(y2 - y1), int(x2 - x1))
 
-            bounding_boxes[row[0]] = bb
+            # key points
+            key_points = row[5:15]
+
+            bounding_boxes[row[0]] = [bb, key_points]
         return bounding_boxes
 
 
@@ -103,7 +107,9 @@ def load_data(data_dir, is_training, epoch_num, batch_size, param):
                 # facenet use so-called "prewhiten"
                 # image_normalized = tf.image.per_image_standardization(image_resized)
             with tf.name_scope("data_augmentation"):
-                image_augmented = tf.image.random_flip_left_right(image_normalized)
+                # image_augmented = tf.image.random_flip_left_right(image_normalized)
+                # CASIA-WebFace is already flipped
+                image_augmented = image_normalized
 
             return image_augmented, tf.one_hot(label, depth=num_class)
 
@@ -174,8 +180,8 @@ def check_dim(path):
 
 
 if __name__ == '__main__':
-    fail_path = '/home/hyh/datasets/CASIA-WebFace/Normalized_Faces/webface/fail.txt'
-    bb_path = '/home/hyh/datasets/CASIA-WebFace/Normalized_Faces/webface/bounding_boxes.txt'
+    # fail_path = '/home/hyh/datasets/CASIA-WebFace/Normalized_Faces/webface/fail.txt'
+    # bb_path = '/home/hyh/datasets/CASIA-WebFace/Normalized_Faces/webface/bounding_boxes.txt'
 
     data_dir = '/home/hyh/datasets/CASIA-WebFace/Normalized_Faces/webface/100'
 
