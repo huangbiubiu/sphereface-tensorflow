@@ -419,49 +419,50 @@ def findSimilarity(uv: tf.Tensor, xy: tf.Tensor, options=None):
     % Need to reset options.K to prepare for calls to findNonreflectiveSimilarity.
     % This is safe because we already checked that there are enough point pairs.
     """
-    options = {'K': 2}
+    with tf.name_scope("findSimilarity"):
+        options = {'K': 2}
 
-    #    uv = np.array(uv)
-    #    xy = np.array(xy)
+        #    uv = np.array(uv)
+        #    xy = np.array(xy)
 
-    # Solve for trans1
-    trans1, trans1_inv = findNonreflectiveSimilarity(uv, xy, options)
+        # Solve for trans1
+        trans1, trans1_inv = findNonreflectiveSimilarity(uv, xy, options)
 
-    # Solve for trans2
+        # Solve for trans2
 
-    # manually reflect the xy data across the Y-axis
-    xyR = xy
-    # xyR[:, 0] = -1 * xyR[:, 0]
-    xyR0 = tf.reshape(xyR[:, 0], (-1, 1)) * -1
-    xyR = tf.concat(axis=1, values=(xyR0, xyR[:, 1:]))
+        # manually reflect the xy data across the Y-axis
+        xyR = xy
+        # xyR[:, 0] = -1 * xyR[:, 0]
+        xyR0 = tf.reshape(xyR[:, 0], (-1, 1)) * -1
+        xyR = tf.concat(axis=1, values=(xyR0, xyR[:, 1:]))
 
-    trans2r, trans2r_inv = findNonreflectiveSimilarity(uv, xyR, options)
+        trans2r, trans2r_inv = findNonreflectiveSimilarity(uv, xyR, options)
 
-    # manually reflect the tform to undo the reflection done on xyR
-    TreflectY = tf.constant([
-        [-1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1]
-    ], dtype=tf.float32)
+        # manually reflect the tform to undo the reflection done on xyR
+        TreflectY = tf.constant([
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1]
+        ], dtype=tf.float32)
 
-    trans2 = tf.tensordot(trans2r, TreflectY, axes=(1, 0))
+        trans2 = tf.tensordot(trans2r, TreflectY, axes=(1, 0))
 
-    # Figure out if trans1 or trans2 is better
-    xy1 = tformfwd(trans1, uv)
-    norm1 = tf.norm(xy1 - xy)
+        # Figure out if trans1 or trans2 is better
+        xy1 = tformfwd(trans1, uv)
+        norm1 = tf.norm(xy1 - xy)
 
-    xy2 = tformfwd(trans2, uv)
-    # norm2 = norm(xy2 - xy)
-    norm2 = tf.norm(xy2 - xy)
+        xy2 = tformfwd(trans2, uv)
+        # norm2 = norm(xy2 - xy)
+        norm2 = tf.norm(xy2 - xy)
 
-    # if norm1 <= norm2:
-    #     return trans1, trans1_inv
-    # else:
-    #     trans2_inv = inv(trans2)
-    #     return trans2, trans2_inv
+        # if norm1 <= norm2:
+        #     return trans1, trans1_inv
+        # else:
+        #     trans2_inv = inv(trans2)
+        #     return trans2, trans2_inv
 
-    return tf.cond(norm1 <= norm2, lambda: (trans1, trans1_inv, "True"),
-                   lambda: (trans2, tf.matrix_inverse(trans2), "False"))
+    return tf.cond(norm1 <= norm2, lambda: (trans1, trans1_inv),
+                   lambda: (trans2, tf.matrix_inverse(trans2)))
 
 
 def get_similarity_transform(src_pts, dst_pts, reflective=True):
@@ -496,10 +497,11 @@ def get_similarity_transform(src_pts, dst_pts, reflective=True):
             inverse of trans, transform matrix from xy to uv
     """
 
-    if reflective:
-        trans, trans_inv = findSimilarity(src_pts, dst_pts)
-    else:
-        trans, trans_inv = findNonreflectiveSimilarity(src_pts, dst_pts)
+    with tf.name_scope("get_similarity_transform"):
+        if reflective:
+            trans, trans_inv = findSimilarity(src_pts, dst_pts)
+        else:
+            trans, trans_inv = findNonreflectiveSimilarity(src_pts, dst_pts)
 
     return trans, trans_inv
 
@@ -528,7 +530,8 @@ def cvt_tform_mat_for_cv2(trans: tf.Tensor):
             for cv2.warpAffine()
     """
     # cv2_trans = trans[:, 0:2].T
-    cv2_trans = tf.transpose(trans[:, 0:2])
+    with tf.name_scope("cvt_tform_mat_for_cv2"):
+        cv2_trans = tf.transpose(trans[:, 0:2])
 
     return cv2_trans
 
@@ -564,7 +567,8 @@ def get_similarity_transform_for_cv2(src_pts, dst_pts, reflective=True):
             transform matrix from src_pts to dst_pts, could be directly used
             for cv2.warpAffine()
     """
-    trans, trans_inv = get_similarity_transform(src_pts, dst_pts, reflective)
-    cv2_trans = cvt_tform_mat_for_cv2(trans)
+    with tf.name_scope("get_similarity_transform_for_cv2"):
+        trans, trans_inv = get_similarity_transform(src_pts, dst_pts, reflective)
+        cv2_trans = cvt_tform_mat_for_cv2(trans)
 
     return cv2_trans

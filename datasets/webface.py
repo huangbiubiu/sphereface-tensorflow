@@ -2,7 +2,17 @@
 import csv
 import os
 import tensorflow as tf
+import tensorflow.contrib as contrib
 import numpy as np
+
+# from https://github.com/wy1iu/sphereface/blob/master/preprocess/code/face_align_demo.m#L22
+from tools.cp2tform import get_similarity_transform_for_cv2
+
+coord5point = np.array([[30.2946, 51.6963],
+                        [65.5318, 51.5014],
+                        [48.0252, 71.7366],
+                        [33.5493, 92.3655],
+                        [62.7299, 92.2041]], dtype=np.float32)
 
 
 def list_images(data_dir, cls_name, cls2idx):
@@ -34,8 +44,15 @@ def get_fail_detect_files(path: str) -> set:
 
 
 def get_bounding_boxes(path, margin=44, img_size=None):
+    """file format
+            [offset_height, offset_width, target_height, target_width, confidence,
+            left_eye_x, right_eye_x, nose_x, left_lip_x, right_lip_x,
+            left_eye_y, right_eye_y, nose_y, left_lip_y, right_lip_y]"""
+
     if img_size is None:
-        img_size = [100, 100]
+        # image size by
+        # https://github.com/wy1iu/sphereface/blob/master/preprocess/code/face_align_demo.m#L21
+        img_size = [112, 96]
     if os.path.isdir(path):
         raise ValueError("Parameter path should be a file instead of a dic")
 
@@ -58,7 +75,7 @@ def get_bounding_boxes(path, margin=44, img_size=None):
             bb = (int(y1), int(x1), int(y2 - y1), int(x2 - x1))
 
             # key points
-            key_points = row[5:15]
+            key_points = [float(item) for item in row[5:15]]
 
             bounding_boxes[row[0]] = [bb, key_points]
         return bounding_boxes
@@ -66,6 +83,13 @@ def get_bounding_boxes(path, margin=44, img_size=None):
 
 def load_data(data_dir, is_training, epoch_num, batch_size, param):
     data_dir = os.path.expanduser(data_dir)
+
+    if 'image_size' in param:
+        image_size = param['image_size']
+        if isinstance(image_size, int):
+            image_size = [image_size, image_size]
+    else:
+        image_size = [112, 96]
 
     # construct dataset with python code
     face_classes = os.listdir(data_dir)
@@ -85,7 +109,15 @@ def load_data(data_dir, is_training, epoch_num, batch_size, param):
 
     # construct tensorflow dataset graph
     with tf.name_scope("load_webface"):
-        def decode_data(image_path, label, bounding_box):
+        def decode_data(image_path: str, label, bounding_box, key_points):
+            """
+            decode path to tensor
+            :param image_path: path of image to be decoded
+            :param label: training label of image
+            :param bounding_box: detection infomation of image
+
+            :return:
+            """
             # read image from file
             image_file = tf.read_file(image_path)
             image_decoded = tf.image.decode_image(image_file)
@@ -94,12 +126,24 @@ def load_data(data_dir, is_training, epoch_num, batch_size, param):
 
             # crop image
             with tf.name_scope("image_cropping"):
-                image_cropped = tf.image.crop_to_bounding_box(image_decoded,
-                                                              bounding_box[0],
-                                                              bounding_box[1],
-                                                              bounding_box[2],
-                                                              bounding_box[3])
-                image_resized = tf.image.resize_images(image_cropped, [100, 100])
+                '''order of key points:
+                 [left_eye_x, right_eye_x, nose_x, left_lip_x, right_lip_x,
+                 left_eye_y, right_eye_y, nose_y, left_lip_y, right_lip_y]'''
+                key_pts = tf.transpose(tf.reshape(key_points, (2, -1)))
+                with tf.name_scope("convert_cv_transform_to_tf"):
+                    transform = get_similarity_transform_for_cv2(key_pts, coord5point)
+                    transform = tf.reshape(transform, (1, -1))
+                    transform = tf.concat(axis=1,
+                                          values=(transform,
+                                                  tf.zeros((1, 2), dtype=tf.float32)))
+
+                image_transformed = contrib.image.transform(image_decoded, transform)
+                # image_cropped = tf.image.crop_to_bounding_box(image_decoded,
+                #                                               bounding_box[0],
+                #                                               bounding_box[1],
+                #                                               bounding_box[2],
+                #                                               bounding_box[3])
+                image_resized = tf.image.resize_images(image_transformed, image_size)
 
             with tf.name_scope("image_normalization"):
                 # the implementation of normalization in 1704.08063 Sec 4.1
@@ -116,7 +160,8 @@ def load_data(data_dir, is_training, epoch_num, batch_size, param):
         dataset = tf.data.Dataset.from_tensor_slices(
             (list(map(lambda item: item[0], data_list)),
              list(map(lambda item: item[1], data_list)),
-             list(map(lambda item: item[2], data_list))))
+             list(map(lambda item: item[2][0], data_list)),
+             list(map(lambda item: item[2][1], data_list))))
 
         dataset = dataset.prefetch(batch_size)
         dataset = dataset.map(decode_data)
