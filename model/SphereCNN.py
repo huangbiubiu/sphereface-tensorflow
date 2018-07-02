@@ -14,7 +14,9 @@ class SphereCNN(NerualNetwork):
                     name: str,
                     strides=1,
                     conv_first=True,
-                    activation_name='prelu'):
+                    activation_name='prelu',
+                    bias_regularizer=None,
+                    weight_regularizer=None):
         def prelu(_x, scope=None):
             """parametric ReLU activation"""
             # reference https://stackoverflow.com/a/44947501/5634636
@@ -38,7 +40,9 @@ class SphereCNN(NerualNetwork):
                                      padding='SAME',
                                      strides=(strides, strides),
                                      activation=activation,
-                                     name=name + '_1')
+                                     name=name + '_1',
+                                     kernel_regularizer=weight_regularizer,
+                                     bias_regularizer=bias_regularizer)
         else:
             conv1 = data_in
         conv2 = tf.layers.conv2d(conv1,
@@ -46,13 +50,17 @@ class SphereCNN(NerualNetwork):
                                  kernel_size=[kernel_size, kernel_size],
                                  padding='SAME',
                                  activation=activation,
-                                 name=name + '_2')
+                                 name=name + '_2',
+                                 kernel_regularizer=weight_regularizer,
+                                 bias_regularizer=bias_regularizer)
         conv3 = tf.layers.conv2d(conv2,
                                  filters=filters,
                                  kernel_size=[kernel_size, kernel_size],
                                  padding='SAME',
                                  activation=activation,
-                                 name=name + '_3')
+                                 name=name + '_3',
+                                 kernel_regularizer=weight_regularizer,
+                                 bias_regularizer=bias_regularizer)
         res = tf.add(conv1, conv3, name=name + '_res')
         # tf.summary.image(name + '_res', res)
         return res
@@ -63,6 +71,8 @@ class SphereCNN(NerualNetwork):
         # https://github.com/wy1iu/sphereface/blob/master/train/code/sphereface_model.prototxt
 
         global_steps = param['global_steps']
+        weight_regularizer = param['weight_regularizer'] if 'weight_regularizer' in param else None
+        bias_regularizer = param['bias_regularizer'] if 'bias_regularizer' in param else None
 
         tf.summary.image("input_image", images)
 
@@ -72,27 +82,43 @@ class SphereCNN(NerualNetwork):
         # images.set_shape((None, *image_size, 3))
 
         feature_map1 = self.__res_block(images, kernel_size=3, filters=64, strides=2, conv_first=True,
-                                        name='conv1_1')
+                                        name='conv1_1', weight_regularizer=weight_regularizer,
+                                        bias_regularizer=bias_regularizer)
         feature_map2 = self.__res_block(feature_map1, kernel_size=3, filters=128, strides=2, conv_first=True,
-                                        name='conv2_1')
-        feature_map3 = self.__res_block(feature_map2, kernel_size=3, filters=128, name='conv2_2', conv_first=False)
+                                        name='conv2_1', weight_regularizer=weight_regularizer,
+                                        bias_regularizer=bias_regularizer)
+        feature_map3 = self.__res_block(feature_map2, kernel_size=3, filters=128, name='conv2_2', conv_first=False,
+                                        weight_regularizer=weight_regularizer,
+                                        bias_regularizer=bias_regularizer)
         feature_map4 = self.__res_block(feature_map3, kernel_size=3, filters=256, name='conv3_1', conv_first=True,
-                                        strides=2)
-        feature_map5 = self.__res_block(feature_map4, kernel_size=3, filters=256, name='conv3_2', conv_first=False)
-        feature_map6 = self.__res_block(feature_map5, kernel_size=3, filters=256, name='conv3_3', conv_first=False)
-        feature_map7 = self.__res_block(feature_map6, kernel_size=3, filters=256, name='conv3_4', conv_first=False)
+                                        strides=2, weight_regularizer=weight_regularizer,
+                                        bias_regularizer=bias_regularizer)
+        feature_map5 = self.__res_block(feature_map4, kernel_size=3, filters=256, name='conv3_2', conv_first=False,
+                                        weight_regularizer=weight_regularizer,
+                                        bias_regularizer=bias_regularizer)
+        feature_map6 = self.__res_block(feature_map5, kernel_size=3, filters=256, name='conv3_3', conv_first=False,
+                                        weight_regularizer=weight_regularizer,
+                                        bias_regularizer=bias_regularizer)
+        feature_map7 = self.__res_block(feature_map6, kernel_size=3, filters=256, name='conv3_4', conv_first=False,
+                                        weight_regularizer=weight_regularizer,
+                                        bias_regularizer=bias_regularizer)
         feature_map8 = self.__res_block(feature_map7, kernel_size=3, filters=512, name='conv4', conv_first=True,
-                                        strides=2)
+                                        strides=2, weight_regularizer=weight_regularizer,
+                                        bias_regularizer=bias_regularizer)
 
         # features = tf.reshape(images, [images.get_shape().as_list()[0], -1], name="flatten")
         features = tf.layers.Flatten()(feature_map8)
-        features = tf.layers.dense(features, 512, activation=None, name="fc5")
+        features = tf.layers.dense(features, 512, activation=None, name="fc5",
+                                   kernel_regularizer=weight_regularizer,
+                                   bias_regularizer=bias_regularizer)
 
         # output layer
         # logits = tf.layers.dense(features, num_class, name="output")
         # logits = model.layers.a_softmax(features, num_class, m=3, global_steps=global_steps)
         if param['softmax'] == 'vanilla':
-            logits = tf.layers.dense(features, num_class, name="output")
+            logits = tf.layers.dense(features, num_class, name="output",
+                                     kernel_regularizer=weight_regularizer,
+                                     bias_regularizer=bias_regularizer)
         elif param['softmax'] == 'a-softmax':
             logits = model.layers.a_softmax(features, num_class, m=3, global_steps=global_steps)
         else:

@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import time
 
@@ -42,17 +43,44 @@ def build_graph(dataset_path: str,
     with sess.graph.as_default():
         global_step = tf.train.get_or_create_global_step(graph=sess.graph)
 
+        # weight_regularizer = tf.contrib.layers.l2_regularizer(0.0005)
+        weight_regularizer = None
+
         dataset, num_class = load_data(dataset_path, is_training, epoch_num, batch_size, data_param)
         image, label = dataset
 
         model = cnn_model()
         logits = model.inference(image,
                                  num_class,
-                                 param={**cnn_param, **{'global_steps': global_step, 'image_size': 100}})
-        loss = softmax_loss(logits, label)
+                                 param={**cnn_param,
+                                        **{'global_steps': global_step, 'image_size': 100},
+                                        'weight_regularizer': weight_regularizer})
+        base_loss = softmax_loss(logits, label)
+        reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        loss = tf.add_n([base_loss] + reg_losses, name="loss")
         tf.summary.scalar("loss", loss)
 
-        train_op = tf.train.AdamOptimizer(name='optimizer').minimize(loss, global_step=global_step)
+        # train_op = tf.train.AdamOptimizer(name='optimizer').minimize(loss, global_step=global_step)
+        base_lr = 0.01
+
+        def lr_decay(step):
+            """
+            calculate learning rate
+            same as multistep in caffe
+            see https://github.com/BVLC/caffe/blob/master/src/caffe/solvers/sgd_solver.cpp#L54
+            :param step: stepvalue
+            :return: learning rate for corresponding stepvalue
+            """
+            gamma = 0.1
+            return base_lr * math.pow(gamma, step)
+
+        boundaries = [16000, 24000, 28000]
+        values = [base_lr, *list(map(lr_decay, boundaries))]
+        learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
+        # train_op = tf.train.MomentumOptimizer(momentum=0.9,
+        #                                       name='optimizer',
+        #                                       learning_rate=learning_rate).minimize(loss, global_step=global_step)
+        train_op = tf.train.AdamOptimizer(name='optimizer', learning_rate=5e-4).minimize(loss, global_step=global_step)
 
         summary_op = tf.summary.merge_all()
 
