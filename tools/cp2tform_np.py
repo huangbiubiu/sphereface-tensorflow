@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
-
-# -*- coding: utf-8 -*-
 """
 Created on Tue Jul 11 06:54:28 2017
 
 @author: zhaoyafei
-
-https://raw.githubusercontent.com/DQ0408/SphereFace-TensorFlow/master/matlab_cp2tform.py
 """
 
 import numpy as np
 from numpy.linalg import inv, norm, lstsq
 from numpy.linalg import matrix_rank as rank
+
 
 """
 Introduction:
@@ -169,12 +166,10 @@ else
 end
 """
 
-
 class MatlabCp2tormException(Exception):
     def __str__(self):
         return 'In File {}:{}'.format(
-            __file__, super.__str__(self))
-
+                __file__, super.__str__(self))
 
 def tformfwd(trans, uv):
     """
@@ -328,8 +323,8 @@ def findNonreflectiveSimilarity(uv, xy, options=None):
 
     Tinv = np.array([
         [sc, -ss, 0],
-        [ss, sc, 0],
-        [tx, ty, 1]
+        [ss,  sc, 0],
+        [tx,  ty, 1]
     ])
 
     # print '--->Tinv:\n', Tinv
@@ -400,8 +395,8 @@ def findSimilarity(uv, xy, options=None):
     """
     options = {'K': 2}
 
-    #    uv = np.array(uv)
-    #    xy = np.array(xy)
+#    uv = np.array(uv)
+#    xy = np.array(xy)
 
     # Solve for trans1
     trans1, trans1_inv = findNonreflectiveSimilarity(uv, xy, options)

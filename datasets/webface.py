@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 import csv
+import cv2
 import os
 import tensorflow as tf
 import tensorflow.contrib as contrib
+import tools.cp2tform_np
 import numpy as np
 
-# from https://github.com/wy1iu/sphereface/blob/master/preprocess/code/face_align_demo.m#L22
 from tools.cp2tform import get_similarity_transform_for_cv2
 
+# from https://github.com/wy1iu/sphereface/blob/master/preprocess/code/face_align_demo.m#L22
 coord5point = np.array([[30.2946, 51.6963],
                         [65.5318, 51.5014],
                         [48.0252, 71.7366],
@@ -75,10 +77,29 @@ def get_bounding_boxes(path, margin=44, img_size=None):
             bb = (int(y1), int(x1), int(y2 - y1), int(x2 - x1))
 
             # key points
-            key_points = [float(item) for item in row[5:15]]
+            key_points = [float(item) for item in row[6:16]]
 
             bounding_boxes[row[0]] = [bb, key_points]
         return bounding_boxes
+
+
+def alignment(src_img, src_pts):
+    ref_pts = [[30.2946, 51.6963], [65.5318, 51.5014],
+               [48.0252, 71.7366], [33.5493, 92.3655], [62.7299, 92.2041]]
+    crop_size = (96, 112)
+    #     src_pts = np.array(src_pts).reshape((5,2))
+    src_pts = np.array(src_pts).reshape((2, -1)).T
+
+    s = np.array(src_pts).astype(np.float32)
+    r = np.array(ref_pts).astype(np.float32)
+
+    tfm = tools.cp2tform_np.get_similarity_transform_for_cv2(s.copy(), r.copy())
+
+    # print(src_img.shape)
+    # print(src_img)
+    face_img = cv2.warpAffine(src_img, tfm, crop_size)
+    #     print(face_img.shape)
+    return np.expand_dims(face_img, axis=2).astype(np.float32)
 
 
 def load_data(data_dir, is_training, epoch_num, batch_size, param):
@@ -125,29 +146,39 @@ def load_data(data_dir, is_training, epoch_num, batch_size, param):
             image_decoded.set_shape([100, 100, 1])
 
             # crop image
-            with tf.name_scope("image_cropping"):
+            with tf.name_scope("image_alignment"):
                 '''order of key points:
                  [left_eye_x, right_eye_x, nose_x, left_lip_x, right_lip_x,
                  left_eye_y, right_eye_y, nose_y, left_lip_y, right_lip_y]'''
-                key_pts = tf.transpose(tf.reshape(key_points, (2, -1)))
-                with tf.name_scope("convert_cv_transform_to_tf"):
-                    transform = get_similarity_transform_for_cv2(key_pts, coord5point)
-                    transform = tf.reshape(transform, (1, -1))
-                    transform = tf.concat(axis=1,
-                                          values=(transform,
-                                                  tf.zeros((1, 2), dtype=tf.float32)))
+                # image_transformed = tf.py_func(alignment, [image_decoded, key_points], tf.float32)
+                # image_transformed.set_shape([112, 96, 1])
 
-                image_transformed = contrib.image.transform(image_decoded, transform)
+                # key_pts = tf.transpose(tf.reshape(key_points, (2, -1)))
+                key_pts = tf.py_func(lambda pts: np.reshape(pts, (-1, 2), order='F'), [key_points], tf.float32)
+                key_pts.set_shape([5, 2])
+                with tf.name_scope("convert_cv_transform_to_tf"):
+                    transform_cv2 = get_similarity_transform_for_cv2(key_pts, coord5point)
+                    transform_tf = tf.concat(axis=1,
+                                             values=(tf.reshape(transform_cv2, (1, -1)),
+                                                     tf.zeros((1, 2), dtype=tf.float32)))
+
+                # image_transformed = contrib.image.transform(image_decoded, transform)
+                image_transformed = tf.py_func(
+                    lambda img, trans: np.expand_dims(cv2.warpAffine(img, trans, (image_size[1], image_size[0])),
+                                                      axis=2),
+                    [image_decoded, transform_cv2], tf.uint8)
+                image_transformed = tf.cast(image_transformed, tf.float32)
+                image_transformed.set_shape([112, 96, 1])
                 # image_cropped = tf.image.crop_to_bounding_box(image_decoded,
                 #                                               bounding_box[0],
                 #                                               bounding_box[1],
                 #                                               bounding_box[2],
                 #                                               bounding_box[3])
-                image_resized = tf.image.resize_images(image_transformed, image_size)
+                # image_resized = tf.image.resize_images(image_transformed, image_size)
 
             with tf.name_scope("image_normalization"):
                 # the implementation of normalization in 1704.08063 Sec 4.1
-                image_normalized = tf.div(tf.subtract(tf.cast(image_resized, tf.float32), 127.5), 128)
+                image_normalized = tf.div(tf.subtract(tf.cast(image_transformed, tf.float32), 127.5), 128)
                 # facenet use so-called "prewhiten"
                 # image_normalized = tf.image.per_image_standardization(image_resized)
             with tf.name_scope("data_augmentation"):
@@ -173,66 +204,3 @@ def load_data(data_dir, is_training, epoch_num, batch_size, param):
             dataset = dataset.shuffle(10 * batch_size).batch(batch_size)
 
         return dataset.make_one_shot_iterator().get_next(), num_class
-
-
-def check_dim(path):
-    def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='█'):
-        """
-        Call in a loop to create terminal progress bar
-        @params:
-            iteration   - Required  : current iteration (Int)
-            total       - Required  : total iterations (Int)
-            prefix      - Optional  : prefix string (Str)
-            suffix      - Optional  : suffix string (Str)
-            decimals    - Optional  : positive number of decimals in percent complete (Int)
-            length      - Optional  : character length of bar (Int)
-            fill        - Optional  : bar fill character (Str)
-        """
-        percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
-        filledLength = int(length * iteration // total)
-        bar = fill * filledLength + '-' * (length - filledLength)
-        print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end='\r')
-        # Print New Line on Complete
-        if iteration == total:
-            print()
-
-    import skimage.io
-    import numpy as np
-
-    data_dir = os.path.expanduser(path)
-
-    # construct dataset with python code
-    face_classes = os.listdir(data_dir)
-    class2index = {k: v for v, k in enumerate(face_classes)}
-    data_list = list(map(lambda cls: list_images(data_dir, cls, class2index), face_classes))
-    # flat the list
-    data_list = [item for sublist in data_list for item in sublist]
-
-    iter_count = 0
-    printProgressBar(iter_count, len(data_list))
-    depth_count = [0, 0]
-    for image_path, label in data_list:
-        img_file = skimage.io.imread(image_path)
-        if len(img_file.shape) == 2:
-            depth_count[0] += 1
-        elif img_file.shape[2] == 3:
-            depth_count[1] += 1
-        else:
-            raise ValueError(f"{image_path} with shape {depth}")
-        iter_count = iter_count + 1
-        printProgressBar(iter_count, len(data_list),
-                         suffix=f"(100,100): {depth_count[0]}, (100,100,3): {depth_count[1]}")
-
-
-if __name__ == '__main__':
-    # fail_path = '/home/hyh/datasets/CASIA-WebFace/Normalized_Faces/webface/fail.txt'
-    # bb_path = '/home/hyh/datasets/CASIA-WebFace/Normalized_Faces/webface/bounding_boxes.txt'
-
-    data_dir = '/home/hyh/datasets/CASIA-WebFace/Normalized_Faces/webface/100'
-
-    data, _ = load_data(data_dir, True, None, 256, {'fail_path': fail_path, 'bounding_boxes': bb_path})
-
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    with tf.Session(config=config) as sess:
-        sess.run(data)
