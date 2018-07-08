@@ -46,8 +46,20 @@ def align(image, mtcnn_param):
     rnet = mtcnn_param['rnet']
     onet = mtcnn_param['onet']
 
-    image = np.stack((image, image, image), axis=2)
+    if len(np.shape(image)) == 2:  # expand gray scale image to RGB
+        image = np.stack((image, image, image), axis=2)
     bounding_boxes, key_points = detect_face.detect_face(image, minsize, pnet, rnet, onet, threshold, factor)
+
+    if len(bounding_boxes) > 1:
+        # select the bounding box with largest area
+        def area(bb):
+            x1, y1, x2, y2 = bb[:4]
+            return (x2 - x1) * (y2 - y1)
+
+        bounding_box, key_point = max(zip(bounding_boxes, key_points.T.tolist()), key=lambda item: area(item[0]))
+        return np.reshape(bounding_box, (1, 5)).tolist(), np.reshape(key_point, (10, 1)).tolist()
+    elif len(bounding_boxes) == 0:
+        return [], []
 
     return bounding_boxes.tolist(), key_points.tolist()
 

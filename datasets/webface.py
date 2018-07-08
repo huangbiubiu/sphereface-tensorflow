@@ -7,14 +7,104 @@ import tensorflow.contrib as contrib
 import tools.cp2tform_np
 import numpy as np
 
+from datasets.Dataset import Dataset
 from tools.cp2tform import get_similarity_transform_for_cv2
 
-# from https://github.com/wy1iu/sphereface/blob/master/preprocess/code/face_align_demo.m#L22
-coord5point = np.array([[30.2946, 51.6963],
-                        [65.5318, 51.5014],
-                        [48.0252, 71.7366],
-                        [33.5493, 92.3655],
-                        [62.7299, 92.2041]], dtype=np.float32)
+import align.mtcnn.Aligner
+
+
+class WebFace(Dataset):
+
+    def __init__(self):
+        # from https://github.com/wy1iu/sphereface/blob/master/preprocess/code/face_align_demo.m#L22
+        self.coord5point = np.array([[30.2946, 51.6963],
+                                     [65.5318, 51.5014],
+                                     [48.0252, 71.7366],
+                                     [33.5493, 92.3655],
+                                     [62.7299, 92.2041]], dtype=np.float32)
+
+    def load_data(self, data_dir, is_training, epoch_num, batch_size, data_param):
+        data_dir = os.path.expanduser(data_dir)
+
+        if 'image_size' in data_param:
+            image_size = data_param['image_size']
+            if isinstance(image_size, int):
+                image_size = [image_size, image_size]
+        else:
+            image_size = [112, 96]
+
+        # construct dataset with python code
+        face_classes = os.listdir(data_dir)
+        num_class = len(face_classes)
+        class2index = {k: v for v, k in enumerate(face_classes)}
+        data_list = map(lambda cls: list_images(data_dir, cls, class2index), face_classes)
+        # flat the list
+        data_list = [item for sublist in data_list for item in sublist]
+
+        # fail_detect_images = get_fail_detect_files(data_param['fail_path'])
+        # bounding_boxes = get_bounding_boxes(data_param['bounding_boxes'], margin=data_param['margin'])
+        #
+        # # remove images failed to detect faces
+        # data_list = filter(lambda item: item[0] not in fail_detect_images, data_list)
+        # # add bounding boxes to dataset
+        # data_list = list(map(lambda item: [item[0], item[1], bounding_boxes[item[0]]], data_list))
+
+        # construct tensorflow dataset graph
+        with tf.name_scope("load_webface"):
+            def decode_data(image_path: str, label):
+                """
+                decode path to tensor
+                :param image_path: path of image to be decoded
+                :param label: training label of image
+                :return: augmented image and corresponding one hot label.
+                augmented image will be all zero when failed to detect faces in image
+                """
+                # read image from file
+                image_file = tf.read_file(image_path)
+                image_decoded = tf.image.decode_image(image_file)
+                image_decoded = tf.cond(tf.equal(tf.shape(image_decoded)[2], 1),
+                                        lambda: tf.image.grayscale_to_rgb(image_decoded),
+                                        lambda: image_decoded)
+
+                aligner = align.mtcnn.Aligner.Aligner([112, 96])
+
+                # crop image
+                with tf.name_scope("image_alignment"):
+                    # image_decoded = tf.Print(image_decoded, [tf.shape(image_decoded)], "SHAPE OF IMAGE_dECODED")
+                    # label = tf.Print(label, [label], "LABEL")
+                    # align return a all zero matrix if failed to detect faces
+                    image_transformed = tf.py_func(lambda img: aligner.align(img), [image_decoded], tf.float32)
+                    image_transformed.set_shape([112, 96, 3])
+
+                with tf.name_scope("image_normalization"):
+                    # the implementation of normalization in 1704.08063 Sec 4.1
+                    image_normalized = tf.div(tf.subtract(tf.cast(image_transformed, tf.float32), 127.5), 128)
+                    # facenet use so-called "prewhiten"
+                    # image_normalized = tf.image.per_image_standardization(image_resized)
+                with tf.name_scope("data_augmentation"):
+                    image_augmented = tf.image.random_flip_left_right(image_normalized)
+
+                image_augmented = tf.cond(tf.reduce_all(tf.equal(image_transformed, tf.zeros_like(image_transformed))),
+                                          lambda: image_transformed,
+                                          lambda: image_augmented)
+                return image_augmented, tf.one_hot(label, depth=num_class)
+
+            dataset = tf.data.Dataset.from_tensor_slices(
+                (list(map(lambda item: item[0], data_list)),
+                 list(map(lambda item: item[1], data_list))))
+
+            dataset = dataset.prefetch(batch_size * 3)
+            dataset = dataset.map(decode_data)
+            # remove photos which failed to detect faces
+            dataset = dataset.filter(lambda image, label: tf.reduce_all(tf.not_equal(image, tf.zeros_like(image))))
+
+            if is_training:
+
+                dataset = dataset.shuffle(10 * batch_size).repeat(epoch_num).batch(batch_size)
+            else:
+                dataset = dataset.shuffle(10 * batch_size).batch(batch_size)
+
+            return dataset.make_one_shot_iterator().get_next(), num_class
 
 
 def list_images(data_dir, cls_name, cls2idx):
@@ -100,107 +190,3 @@ def alignment(src_img, src_pts):
     face_img = cv2.warpAffine(src_img, tfm, crop_size)
     #     print(face_img.shape)
     return np.expand_dims(face_img, axis=2).astype(np.float32)
-
-
-def load_data(data_dir, is_training, epoch_num, batch_size, param):
-    data_dir = os.path.expanduser(data_dir)
-
-    if 'image_size' in param:
-        image_size = param['image_size']
-        if isinstance(image_size, int):
-            image_size = [image_size, image_size]
-    else:
-        image_size = [112, 96]
-
-    # construct dataset with python code
-    face_classes = os.listdir(data_dir)
-    num_class = len(face_classes)
-    class2index = {k: v for v, k in enumerate(face_classes)}
-    data_list = map(lambda cls: list_images(data_dir, cls, class2index), face_classes)
-    # flat the list
-    data_list = [item for sublist in data_list for item in sublist]
-
-    fail_detect_images = get_fail_detect_files(param['fail_path'])
-    bounding_boxes = get_bounding_boxes(param['bounding_boxes'], margin=param['margin'])
-
-    # remove images failed to detect faces
-    data_list = filter(lambda item: item[0] not in fail_detect_images, data_list)
-    # add bounding boxes to dataset
-    data_list = list(map(lambda item: [item[0], item[1], bounding_boxes[item[0]]], data_list))
-
-    # construct tensorflow dataset graph
-    with tf.name_scope("load_webface"):
-        def decode_data(image_path: str, label, bounding_box, key_points):
-            """
-            decode path to tensor
-            :param image_path: path of image to be decoded
-            :param label: training label of image
-            :param bounding_box: detection infomation of image
-
-            :return:
-            """
-            # read image from file
-            image_file = tf.read_file(image_path)
-            image_decoded = tf.image.decode_image(image_file)
-
-            image_decoded.set_shape([100, 100, 1])
-
-            # crop image
-            with tf.name_scope("image_alignment"):
-                '''order of key points:
-                 [left_eye_x, right_eye_x, nose_x, left_lip_x, right_lip_x,
-                 left_eye_y, right_eye_y, nose_y, left_lip_y, right_lip_y]'''
-                # image_transformed = tf.py_func(alignment, [image_decoded, key_points], tf.float32)
-                # image_transformed.set_shape([112, 96, 1])
-
-                # key_pts = tf.transpose(tf.reshape(key_points, (2, -1)))
-                key_pts = tf.py_func(lambda pts: np.reshape(pts, (-1, 2), order='F'), [key_points], tf.float32)
-                key_pts.set_shape([5, 2])
-                with tf.name_scope("convert_cv_transform_to_tf"):
-                    transform_cv2 = get_similarity_transform_for_cv2(key_pts, coord5point)
-                    transform_tf = tf.concat(axis=1,
-                                             values=(tf.reshape(transform_cv2, (1, -1)),
-                                                     tf.zeros((1, 2), dtype=tf.float32)))
-
-                # image_transformed = contrib.image.transform(image_decoded, transform)
-                image_transformed = tf.py_func(
-                    lambda img, trans: np.expand_dims(cv2.warpAffine(img, trans, (image_size[1], image_size[0])),
-                                                      axis=2),
-                    [image_decoded, transform_cv2], tf.uint8)
-                image_transformed = tf.cast(image_transformed, tf.float32)
-                image_transformed.set_shape([112, 96, 1])
-                # image_cropped = tf.image.crop_to_bounding_box(image_decoded,
-                #                                               bounding_box[0],
-                #                                               bounding_box[1],
-                #                                               bounding_box[2],
-                #                                               bounding_box[3])
-                # image_resized = tf.image.resize_images(image_transformed, image_size)
-
-            with tf.name_scope("image_normalization"):
-                # the implementation of normalization in 1704.08063 Sec 4.1
-                image_normalized = tf.div(tf.subtract(tf.cast(image_transformed, tf.float32), 127.5), 128)
-                # facenet use so-called "prewhiten"
-                # image_normalized = tf.image.per_image_standardization(image_resized)
-            with tf.name_scope("data_augmentation"):
-                # image_augmented = tf.image.random_flip_left_right(image_normalized)
-                # CASIA-WebFace is already flipped
-                image_augmented = image_normalized
-
-            return image_augmented, tf.one_hot(label, depth=num_class)
-
-        dataset = tf.data.Dataset.from_tensor_slices(
-            (list(map(lambda item: item[0], data_list)),
-             list(map(lambda item: item[1], data_list)),
-             list(map(lambda item: item[2][0], data_list)),
-             list(map(lambda item: item[2][1], data_list))))
-
-        dataset = dataset.prefetch(batch_size)
-        dataset = dataset.map(decode_data)
-
-        if is_training:
-
-            dataset = dataset.shuffle(10 * batch_size).repeat(epoch_num).batch(batch_size)
-        else:
-            dataset = dataset.shuffle(10 * batch_size).batch(batch_size)
-
-        return dataset.make_one_shot_iterator().get_next(), num_class

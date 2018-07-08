@@ -1,15 +1,26 @@
 import argparse
-import math
 import os
 import time
+from enum import Enum, unique
 
 import tensorflow as tf
 
-from datasets.webface import load_data
+from datasets.Dataset import Dataset
+from datasets.lfw import LFW
 from model.NaiveCNN import NaiveCNN
 from model.NerualNetwork import NerualNetwork
 from model.SphereCNN import SphereCNN
 from model.loss import softmax_loss
+
+import numpy as np
+import datasets.webface
+
+
+@unique
+class GraphType(Enum):
+    TRAIN = 0
+    TEST = 1
+    EVAL = 2
 
 
 def parse_arg(argv) -> argparse.Namespace:
@@ -33,20 +44,23 @@ def parse_arg(argv) -> argparse.Namespace:
 
 def build_graph(dataset_path: str,
                 log_dir: str,
-                is_training: bool,
+                graph_type: GraphType,
                 epoch_num: int,
                 batch_size: int,
                 cnn_model: NerualNetwork.__class__,
                 cnn_param: dict,
                 sess: tf.Session,
-                data_param: dict):
+                data_param: dict,
+                data_loader: Dataset):
     with sess.graph.as_default():
         global_step = tf.train.get_or_create_global_step(graph=sess.graph)
 
-        # weight_regularizer = tf.contrib.layers.l2_regularizer(0.0005)
-        weight_regularizer = None
+        weight_regularizer = tf.contrib.layers.l2_regularizer(0.001)
+        # weight_regularizer = None
 
-        dataset, num_class = load_data(dataset_path, is_training, epoch_num, batch_size, data_param)
+        is_training = graph_type == GraphType.TRAIN
+        dataset, num_class = data_loader.load_data(dataset_path, is_training, epoch_num, batch_size,
+                                                   data_param=data_param)
         image, label = dataset
 
         model = cnn_model()
@@ -55,39 +69,53 @@ def build_graph(dataset_path: str,
                                  param={**cnn_param,
                                         **{'global_steps': global_step, 'image_size': 100},
                                         'weight_regularizer': weight_regularizer})
+
+        if graph_type == GraphType.EVAL:
+            # return normalized features and corresponding labels
+            return logits / tf.reshape(tf.norm(logits, axis=1), (-1, 1)), label, global_step
+
         base_loss = softmax_loss(logits, label)
         reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         loss = tf.add_n([base_loss] + reg_losses, name="loss")
         tf.summary.scalar("loss", loss)
 
+        # SGD training strategy
         # train_op = tf.train.AdamOptimizer(name='optimizer').minimize(loss, global_step=global_step)
-        base_lr = 0.01
-
-        def lr_decay(step):
-            """
-            calculate learning rate
-            same as multistep in caffe
-            see https://github.com/BVLC/caffe/blob/master/src/caffe/solvers/sgd_solver.cpp#L54
-            :param step: stepvalue
-            :return: learning rate for corresponding stepvalue
-            """
-            gamma = 0.1
-            return base_lr * math.pow(gamma, step)
-
-        boundaries = [16000, 24000, 28000]
-        values = [base_lr, *list(map(lr_decay, boundaries))]
-        learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
+        # base_lr = 1e-4
+        #
+        # def lr_decay(step):
+        #     """
+        #     calculate learning rate
+        #     same as multistep in caffe
+        #     see https://github.com/BVLC/caffe/blob/master/src/caffe/solvers/sgd_solver.cpp#L54
+        #     :param step: stepvalue
+        #     :return: learning rate for corresponding stepvalue
+        #     """
+        #     gamma = 0.1
+        #     return base_lr * math.pow(gamma, step)
+        #
+        # boundaries = [16000, 24000, 28000]
+        # values = [base_lr, *list(map(lr_decay, boundaries))]
+        # learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
         # train_op = tf.train.MomentumOptimizer(momentum=0.9,
         #                                       name='optimizer',
         #                                       learning_rate=learning_rate).minimize(loss, global_step=global_step)
-        train_op = tf.train.AdamOptimizer(name='optimizer', learning_rate=5e-4).minimize(loss, global_step=global_step)
+        learning_rate = tf.train.polynomial_decay(learning_rate=1e-4, global_step=global_step, decay_steps=500,
+                                                  end_learning_rate=1e-5, name="learning_rate")
+        learning_rate = 5e-5
+        tf.summary.scalar("learning_rate", learning_rate)
+        train_op = tf.train.AdamOptimizer(name='optimizer', learning_rate=learning_rate).minimize(loss,
+                                                                                                  global_step=global_step)
 
         summary_op = tf.summary.merge_all()
 
         saver = tf.train.Saver(max_to_keep=5)
 
         # initialize variables
-        latest_ckpt = tf.train.latest_checkpoint(os.path.expanduser(log_dir))
+        if os.path.isdir(log_dir):
+            latest_ckpt = tf.train.latest_checkpoint(os.path.expanduser(log_dir))
+        else:
+            latest_ckpt = log_dir
         if latest_ckpt is not None:
             # restore model
             saver.restore(sess, latest_ckpt)
@@ -96,11 +124,13 @@ def build_graph(dataset_path: str,
 
         # add accuracy node
         with tf.name_scope("accuracy"):
-            if is_training:
+            if graph_type == GraphType.TRAIN:
                 acc = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(label, axis=1), tf.argmax(logits, axis=1)), tf.float32))
                 acc_op = None
-            else:
+            elif graph_type == GraphType.TEST:
                 acc, acc_op = tf.metrics.accuracy(tf.argmax(label, axis=1), tf.argmax(logits, axis=1))
+            else:
+                raise ValueError(f"Illegal argument graph_type: {graph_type}")
             tf.summary.scalar("acc", acc)
             acc_summary = tf.summary.merge_all()
 
@@ -121,13 +151,15 @@ def train_and_evaluate(dataset_path,
                        eval_every_step=1000):
     is_final_eval = False
     while not is_final_eval:
+        data_loader = datasets.webface.WebFace()
+
         training_step = 0
         tf.reset_default_graph()
         with tf.Session(config=sess_config) as sess:
             # build training graph
             train_op, train_acc, _, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
                 dataset_path=dataset_path,
-                is_training=True,
+                graph_type=GraphType.TRAIN,
                 epoch_num=epoch_num,
                 batch_size=batch_size,
                 cnn_model=cnn_model,
@@ -136,7 +168,8 @@ def train_and_evaluate(dataset_path,
                 log_dir=logdir,
                 data_param={'fail_path': args.fail_path,
                             'bounding_boxes': args.bounding_box_path,
-                            'margin': args.margin})
+                            'margin': args.margin},
+                data_loader=data_loader)
             train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'), sess.graph)
             while training_step <= eval_every_step:
                 try:
@@ -155,7 +188,12 @@ def train_and_evaluate(dataset_path,
                     if step % 100 == 0:
                         train_writer.add_summary(summary, step)
                         train_writer.add_summary(acc_summary, step)
-                        saver.save(sess, os.path.join(os.path.expanduser(logdir), 'model.ckpt'),
+
+                        if os.path.isfile(logdir):
+                            model_save_path = os.path.dirname(logdir)
+                        else:
+                            model_save_path = logdir
+                        saver.save(sess, os.path.join(os.path.expanduser(model_save_path), 'model.ckpt'),
                                    global_step=step)
                 except tf.errors.OutOfRangeError:  # training completed
                     is_final_eval = True
@@ -179,39 +217,104 @@ def evaluate(dataset_path,
              batch_size,
              sess_config,
              logdir):
-    # tf.reset_default_graph()
-    # with tf.Session(config=sess_config) as sess:
-    #     tf.logging.info("--------Start Evaluation--------")
-    #     tf.logging.info("loading evaluation graph")
-    #
-    #     train_op, eval_acc, acc_op, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
-    #         dataset_path=dataset_path,
-    #         is_training=False,
-    #         epoch_num=1,
-    #         batch_size=batch_size,
-    #         cnn_model=cnn_model,
-    #         cnn_param=cnn_param,
-    #         sess=sess,
-    #         log_dir=logdir)
-    #
-    #     eval_writer = tf.summary.FileWriter(os.path.join(logdir, 'eval'), sess.graph)
-    #
-    #     while True:
-    #         try:
-    #             loss_value, acc, _, summary, acc_summary, step = sess.run(
-    #                 [loss, eval_acc, acc_op, summary_op, acc_summary_op, global_step])
-    #         except tf.errors.OutOfRangeError:
-    #             eval_writer.add_summary(summary, global_step=step)
-    #             eval_writer.add_summary(acc_summary, global_step=step)
-    #
-    #             # make sure all summaries are written to disk
-    #             eval_writer.flush()
-    #             eval_writer.close()
-    #
-    #             tf.logging.info("--------Evaluation Competed--------")
-    #             return acc
-    tf.logging.warn("EVALUATION IS NOT IMPLEMENTED.")
-    return 0  # TODO implement evaluation code
+    """Evaluate on LFW dataset"""
+    tf.reset_default_graph()
+    with tf.Session(config=sess_config) as sess:
+        tf.logging.info("--------START EVALUATION--------")
+        tf.logging.info("loading evaluation graph")
+
+        dataset = LFW('/home/hyh/datasets/lfw')
+
+        logits_op, file_name_op, step_op = build_graph(
+            dataset_path=dataset_path,
+            graph_type=GraphType.EVAL,
+            epoch_num=1,
+            batch_size=batch_size,
+            cnn_model=cnn_model,
+            cnn_param=cnn_param,
+            sess=sess,
+            log_dir=logdir,
+            data_param={},
+            data_loader=dataset)
+
+        logits_flag = False
+        while True:
+            try:
+                logits_, file_name_, step = sess.run([logits_op, file_name_op])
+                if not logits_flag:
+                    logits = logits_
+                    file_name = file_name_
+                    logits_flag = True
+                else:
+                    logits = np.vstack((logits, logits_))
+                    file_name = np.vstack((file_name, file_name_))
+            except tf.errors.OutOfRangeError:
+                break
+
+        embeddings = {}
+        for i in range(len(logits)):
+            embeddings[file_name[i]] = logits[i]
+
+        # excute 10-fold evaluation
+        def get_threshold(val_pairs, similarity, embeddings, thrNum=10000):
+            # numpy implementation for
+            # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L115
+            thresholds = np.arange(-thrNum, thrNum, 1) / thrNum
+            acc = []
+            for t in thresholds:
+                acc.append(similarity(embeddings, val_pairs, t))
+            return np.mean(thresholds[acc == np.max(acc)])
+
+        def cos_similarity(emb: dict, eval_pairs, threshold):
+            # numpy implementation for
+            # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L69
+            pairs = list(map(lambda p: [emb[p[0]], emb[p[1]]], eval_pairs))
+            scores = np.sum(pairs[:, 0] * pairs[:, 1], axis=1)  # inner product for each row
+            """
+            TODO https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L124
+            confused on this implementation:
+            
+                function accuracy = getAccuracy(scores, flags, threshold)
+                    accuracy = (length(find(scores(flags==1)>threshold)) + ...
+                    length(find(scores(flags~=1)<threshold))) / length(scores);
+                end
+            
+            since flags == 1 means same face:
+            
+                if length(strings) == 3
+                    i = i + 1;
+                    pairs(i).fileL = fullfile(folder, strings{1}, [strings{1}, num2str(str2num(strings{2}), '_%04i.jpg')]);
+                    pairs(i).fileR = fullfile(folder, strings{1}, [strings{1}, num2str(str2num(strings{3}), '_%04i.jpg')]);
+                    pairs(i).fold  = ceil(i / 600);
+                    pairs(i).flag  = 1;
+                elseif length(strings) == 4
+                    i = i + 1;
+                    pairs(i).fileL = fullfile(folder, strings{1}, [strings{1}, num2str(str2num(strings{2}), '_%04i.jpg')]);
+                    pairs(i).fileR = fullfile(folder, strings{3}, [strings{3}, num2str(str2num(strings{4}), '_%04i.jpg')]);
+                    pairs(i).fold  = ceil(i / 600);
+                    pairs(i).flag  = -1;
+                end
+            
+            why score>threshold is correct?
+            """
+
+            result = scores > threshold
+            label = np.array(map(lambda p: p[2], eval_pairs))
+            return np.sum(result == label) / len(label)
+
+            pass
+
+        eval_acc = dataset.evaluation(embeddings, get_threshold, cos_similarity)
+
+        # add to tf summary
+        eval_writer = tf.summary.FileWriter(os.path.join(logdir, 'eval'), sess.graph)
+        eval_writer.add_summary(eval_acc, global_step=step)
+
+        # make sure all summaries are written to disk
+        eval_writer.flush()
+        eval_writer.close()
+
+    return eval_acc
 
 
 def save_args(args, path):
@@ -239,7 +342,7 @@ def main(argv):
                        cnn_param={'softmax': args.softmax_type},
                        sess_config=config,
                        logdir=args.log_dir,
-                       eval_every_step=1000,
+                       eval_every_step=100,
                        args=args)
 
 

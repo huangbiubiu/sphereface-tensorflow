@@ -16,7 +16,8 @@ class SphereCNN(NerualNetwork):
                     conv_first=True,
                     activation_name='prelu',
                     bias_regularizer=None,
-                    weight_regularizer=None):
+                    weight_regularizer=None,
+                    remove_last_activation=False):
         def prelu(_x, scope=None):
             """parametric ReLU activation"""
             # reference https://stackoverflow.com/a/44947501/5634636
@@ -57,7 +58,7 @@ class SphereCNN(NerualNetwork):
                                  filters=filters,
                                  kernel_size=[kernel_size, kernel_size],
                                  padding='SAME',
-                                 activation=activation,
+                                 activation=None if remove_last_activation else activation,
                                  name=name + '_3',
                                  kernel_regularizer=weight_regularizer,
                                  bias_regularizer=bias_regularizer)
@@ -104,7 +105,7 @@ class SphereCNN(NerualNetwork):
                                         bias_regularizer=bias_regularizer)
         feature_map8 = self.__res_block(feature_map7, kernel_size=3, filters=512, name='conv4', conv_first=True,
                                         strides=2, weight_regularizer=weight_regularizer,
-                                        bias_regularizer=bias_regularizer)
+                                        bias_regularizer=bias_regularizer, remove_last_activation=True)
 
         # features = tf.reshape(images, [images.get_shape().as_list()[0], -1], name="flatten")
         features = tf.layers.Flatten()(feature_map8)
@@ -120,7 +121,7 @@ class SphereCNN(NerualNetwork):
                                      kernel_regularizer=weight_regularizer,
                                      bias_regularizer=bias_regularizer)
         elif param['softmax'] == 'a-softmax':
-            logits = model.layers.a_softmax(features, num_class, m=3, global_steps=global_steps)
+            logits = model.layers.a_softmax(features, num_class, m=4, global_steps=global_steps)
         else:
             raise ValueError(f"Softmax {param['softmax']} is not supported.")
         tf.summary.histogram("output", logits)

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import tensorflow as tf
 
-
-def a_softmax(features, class_num, m, global_steps, base=1000, gamma=0.12, power=1, lambda_min=5):
+# TODO test the implementation
+def a_softmax(features, class_num, m, global_steps, base=10000, gamma=0.12, power=1, lambda_min=5):
     """
     Implementation of A-Softmax with out cross entropy.
     See arXiv: 1704.08063.
