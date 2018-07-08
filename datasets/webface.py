@@ -93,16 +93,16 @@ class WebFace(Dataset):
                 (list(map(lambda item: item[0], data_list)),
                  list(map(lambda item: item[1], data_list))))
 
-            dataset = dataset.prefetch(batch_size * 3)
+            dataset = dataset.prefetch(batch_size * 100)
             dataset = dataset.map(decode_data)
             # remove photos which failed to detect faces
             dataset = dataset.filter(lambda image, label: tf.reduce_all(tf.not_equal(image, tf.zeros_like(image))))
 
             if is_training:
 
-                dataset = dataset.shuffle(10 * batch_size).repeat(epoch_num).batch(batch_size)
+                dataset = dataset.shuffle(20 * batch_size).repeat(epoch_num).batch(batch_size)
             else:
-                dataset = dataset.shuffle(10 * batch_size).batch(batch_size)
+                dataset = dataset.shuffle(20 * batch_size).batch(batch_size)
 
             return dataset.make_one_shot_iterator().get_next(), num_class
 

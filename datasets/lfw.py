@@ -39,6 +39,10 @@ class LFW(Dataset):
                     # image_augmented = tf.image.random_flip_left_right(image_normalized)
                     # CASIA-WebFace is already flipped
                     image_augmented = image_normalized
+
+                image_augmented = tf.cond(tf.reduce_all(tf.equal(image_transformed, tf.zeros_like(image_transformed))),
+                                          lambda: image_transformed,
+                                          lambda: image_augmented)
                 return image_augmented, label
 
             if is_training:
@@ -49,6 +53,8 @@ class LFW(Dataset):
                      list(map(lambda item: item[1], self.flatten_pairs))))
                 dataset = dataset.prefetch(batch_size * 5)
                 dataset = dataset.map(decode_data)
+                dataset = dataset.filter(lambda image, label: tf.reduce_all(tf.not_equal(image, tf.zeros_like(image))))
+
                 dataset = dataset.shuffle(10 * batch_size).batch(batch_size)
 
                 return dataset.make_one_shot_iterator().get_next(), -1

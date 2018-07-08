@@ -77,8 +77,8 @@ class SphereCNN(NerualNetwork):
 
         tf.summary.image("input_image", images)
 
-        image_size = self.get_image_size(param)
-        images = tf.image.resize_images(images, image_size)
+        # image_size = self.get_image_size(param)
+        # images = tf.image.resize_images(images, image_size)
         # images = images[:, :, :, :3]  # discard the alpha channel
         # images.set_shape((None, *image_size, 3))
 
