@@ -3,6 +3,7 @@
 import tensorflow as tf
 
 import model.layers
+from model import GraphType
 from model.NerualNetwork import NerualNetwork
 
 
@@ -113,8 +114,16 @@ class SphereCNN(NerualNetwork):
                                    kernel_regularizer=weight_regularizer,
                                    bias_regularizer=bias_regularizer)
 
+        if 'graph_type' in param:
+            graph_type = param['graph_type']
+        else:
+            graph_type = GraphType.TRAIN
+
+        if graph_type != GraphType.TRAIN:
+            return features
+
         # output layer
-        # logits = tf.layers.dense(features, num_class, name="output")
+        # 4logits = tf.layers.dense(features, num_class, name="output")
         # logits = model.layers.a_softmax(features, num_class, m=3, global_steps=global_steps)
         if param['softmax'] == 'vanilla':
             logits = tf.layers.dense(features, num_class, name="output",

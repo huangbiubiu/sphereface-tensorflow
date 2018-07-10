@@ -15,14 +15,6 @@ import align.mtcnn.Aligner
 
 class WebFace(Dataset):
 
-    def __init__(self):
-        # from https://github.com/wy1iu/sphereface/blob/master/preprocess/code/face_align_demo.m#L22
-        self.coord5point = np.array([[30.2946, 51.6963],
-                                     [65.5318, 51.5014],
-                                     [48.0252, 71.7366],
-                                     [33.5493, 92.3655],
-                                     [62.7299, 92.2041]], dtype=np.float32)
-
     def load_data(self, data_dir, is_training, epoch_num, batch_size, data_param):
         data_dir = os.path.expanduser(data_dir)
 
@@ -66,13 +58,14 @@ class WebFace(Dataset):
                                         lambda: tf.image.grayscale_to_rgb(image_decoded),
                                         lambda: image_decoded)
 
-                aligner = align.mtcnn.Aligner.Aligner([112, 96])
+                aligner = align.mtcnn.Aligner.Aligner(image_size)
 
                 # crop image
                 with tf.name_scope("image_alignment"):
-                    # image_decoded = tf.Print(image_decoded, [tf.shape(image_decoded)], "SHAPE OF IMAGE_dECODED")
-                    # label = tf.Print(label, [label], "LABEL")
                     # align return a all zero matrix if failed to detect faces
+                    # TODO change the py_func to TensorFlow implementation for improving speed
+                    # speed improved 7x by simply remove the py_func (from 14 sec/batch to 2 sec/batch on Tesla K40c)
+                    # Test on TensorFlow dataset API: ~20.2 entries/sec on h1
                     image_transformed = tf.py_func(lambda img: aligner.align(img), [image_decoded], tf.float32)
                     image_transformed.set_shape([112, 96, 3])
 
@@ -99,10 +92,10 @@ class WebFace(Dataset):
             dataset = dataset.filter(lambda image, label: tf.reduce_all(tf.not_equal(image, tf.zeros_like(image))))
 
             if is_training:
-
-                dataset = dataset.shuffle(20 * batch_size).repeat(epoch_num).batch(batch_size)
+                dataset = dataset.shuffle(10 * batch_size).repeat(epoch_num).batch(batch_size)
+                pass
             else:
-                dataset = dataset.shuffle(20 * batch_size).batch(batch_size)
+                dataset = dataset.batch(batch_size)
 
             return dataset.make_one_shot_iterator().get_next(), num_class
 

@@ -1,8 +1,7 @@
 import argparse
 import os
 import time
-from enum import Enum, unique
-
+from model import GraphType
 import tensorflow as tf
 
 from datasets.Dataset import Dataset
@@ -16,11 +15,7 @@ import numpy as np
 import datasets.webface
 
 
-@unique
-class GraphType(Enum):
-    TRAIN = 0
-    TEST = 1
-    EVAL = 2
+
 
 
 def parse_arg(argv) -> argparse.Namespace:
@@ -68,9 +63,23 @@ def build_graph(dataset_path: str,
                                  num_class,
                                  param={**cnn_param,
                                         **{'global_steps': global_step, 'image_size': 100},
-                                        'weight_regularizer': weight_regularizer})
+                                        'weight_regularizer': weight_regularizer,
+                                        'graph_type': graph_type})
 
         if graph_type == GraphType.EVAL:
+            saver = tf.train.Saver(max_to_keep=5)
+
+            # initialize variables
+            if os.path.isdir(log_dir):
+                latest_ckpt = tf.train.latest_checkpoint(os.path.expanduser(log_dir))
+            else:
+                latest_ckpt = log_dir
+            if latest_ckpt is not None:
+                # restore model
+                saver.restore(sess, latest_ckpt)
+            else:
+                raise ValueError(f"No model to evaluate in {log_dir}")
+
             # return normalized features and corresponding labels
             return logits / tf.reshape(tf.norm(logits, axis=1), (-1, 1)), label, global_step
 
@@ -238,22 +247,25 @@ def evaluate(dataset_path,
             data_loader=dataset)
 
         logits_flag = False
+        batch_count = 0
         while True:
             try:
-                logits_, file_name_, step = sess.run([logits_op, file_name_op])
+                logits_, file_name_, step = sess.run([logits_op, file_name_op, step_op])
                 if not logits_flag:
                     logits = logits_
                     file_name = file_name_
                     logits_flag = True
                 else:
                     logits = np.vstack((logits, logits_))
-                    file_name = np.vstack((file_name, file_name_))
+                    file_name = np.hstack((file_name, file_name_))
+                batch_count += 1
+                tf.logging.debug(f'Evaluating batch {batch_count}')
             except tf.errors.OutOfRangeError:
                 break
 
         embeddings = {}
         for i in range(len(logits)):
-            embeddings[file_name[i]] = logits[i]
+            embeddings[str(file_name[i], encoding='utf8')] = logits[i]
 
         # excute 10-fold evaluation
         def get_threshold(val_pairs, similarity, embeddings, thrNum=10000):
@@ -268,7 +280,8 @@ def evaluate(dataset_path,
         def cos_similarity(emb: dict, eval_pairs, threshold):
             # numpy implementation for
             # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L69
-            pairs = list(map(lambda p: [emb[p[0]], emb[p[1]]], eval_pairs))
+            pairs = list(map(lambda p: [emb[p[0][0]], emb[p[1][0]]], eval_pairs))
+            pairs = np.array(pairs)
             scores = np.sum(pairs[:, 0] * pairs[:, 1], axis=1)  # inner product for each row
             """
             TODO https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L124
@@ -296,10 +309,11 @@ def evaluate(dataset_path,
                 end
             
             why score>threshold is correct?
+            it is right because consine is a decrease function
             """
 
             result = scores > threshold
-            label = np.array(map(lambda p: p[2], eval_pairs))
+            label = np.array(list(map(lambda p: p[2], eval_pairs)))
             return np.sum(result == label) / len(label)
 
             pass
@@ -308,7 +322,10 @@ def evaluate(dataset_path,
 
         # add to tf summary
         eval_writer = tf.summary.FileWriter(os.path.join(logdir, 'eval'), sess.graph)
-        eval_writer.add_summary(eval_acc, global_step=step)
+        summary = tf.Summary()
+        summary.value.add(tag='acc', simple_value=eval_acc)
+        eval_writer.add_summary(summary, global_step=step)
+        # eval_writer.add_summary(eval_acc, global_step=step)
 
         # make sure all summaries are written to disk
         eval_writer.flush()
@@ -342,10 +359,10 @@ def main(argv):
                        cnn_param={'softmax': args.softmax_type},
                        sess_config=config,
                        logdir=args.log_dir,
-                       eval_every_step=100,
+                       eval_every_step=1,
                        args=args)
 
 
 if __name__ == '__main__':
-    tf.logging.set_verbosity(tf.logging.INFO)
+    tf.logging.set_verbosity(tf.logging.DEBUG)
     tf.app.run()

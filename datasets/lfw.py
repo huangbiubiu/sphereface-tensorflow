@@ -12,9 +12,9 @@ import tensorflow as tf
 
 
 class LFW(Dataset):
-    def load_data(self, dataset_path, is_training, epoch_num, batch_size, param):
-        if 'image_size' in param:
-            image_size = param['image_size']
+    def load_data(self, dataset_path, is_training, epoch_num, batch_size, data_param):
+        if 'image_size' in data_param:
+            image_size = data_param['image_size']
             if isinstance(image_size, int):
                 image_size = [image_size, image_size]
         else:
@@ -26,11 +26,17 @@ class LFW(Dataset):
                 # read image from file
                 image_file = tf.read_file(image_path)
                 image_decoded = tf.image.decode_image(image_file)
+                image_decoded.set_shape([250, 250, 3])
 
                 with tf.name_scope("image_alignment"):
                     image_transformed = tf.py_func(lambda img: self.aligner.align(img), [image_decoded], tf.float32)
                     image_transformed.set_shape([112, 96, 3])
                 with tf.name_scope("image_normalization"):
+                    image_transformed = tf.cond(
+                        tf.reduce_all(tf.equal(image_transformed, tf.zeros_like(image_transformed))),
+                        lambda: tf.image.resize_images(image_decoded, image_size),
+                        lambda: image_transformed)
+
                     # the implementation of normalization in 1704.08063 Sec 4.1
                     image_normalized = tf.div(tf.subtract(tf.cast(image_transformed, tf.float32), 127.5), 128)
                     # facenet use so-called "prewhiten"
@@ -40,9 +46,6 @@ class LFW(Dataset):
                     # CASIA-WebFace is already flipped
                     image_augmented = image_normalized
 
-                image_augmented = tf.cond(tf.reduce_all(tf.equal(image_transformed, tf.zeros_like(image_transformed))),
-                                          lambda: image_transformed,
-                                          lambda: image_augmented)
                 return image_augmented, label
 
             if is_training:
@@ -50,12 +53,11 @@ class LFW(Dataset):
             else:
                 dataset = tf.data.Dataset.from_tensor_slices(
                     (list(map(lambda item: item[0], self.flatten_pairs)),
-                     list(map(lambda item: item[1], self.flatten_pairs))))
+                     list(map(lambda item: item[0], self.flatten_pairs))))
                 dataset = dataset.prefetch(batch_size * 5)
                 dataset = dataset.map(decode_data)
-                dataset = dataset.filter(lambda image, label: tf.reduce_all(tf.not_equal(image, tf.zeros_like(image))))
 
-                dataset = dataset.shuffle(10 * batch_size).batch(batch_size)
+                dataset = dataset.batch(batch_size)
 
                 return dataset.make_one_shot_iterator().get_next(), -1
 
@@ -84,20 +86,11 @@ class LFW(Dataset):
             Slobodan_Milosevic      2       Sok_An  1
             """
             lines = pairs_file.readlines()[1:]  # ignore the first line
-            lines = list(map(lambda line: re.split(r'\s|-', line), lines))
+            lines = list(map(lambda line: re.split(r'\s', str.replace(line, '\n', '')), lines))
             self.pairs = lines
 
-            flatten_pairs = []
-            for pair in self.pairs:
-                if len(pair) == 4:
-                    flatten_pairs.append(self.get_image_path(self.path, pair[0], pair[1]))
-                    flatten_pairs.append(self.get_image_path(self.path, pair[2], pair[3]))
-                elif len(pair) == 3:
-                    flatten_pairs.append(self.get_image_path(self.path, pair[0], pair[1]))
-                    flatten_pairs.append(self.get_image_path(self.path, pair[0], pair[2]))
-                else:
-                    raise ValueError(f"Illegal entry {pair}")
-            self.flatten_pairs = flatten_pairs
+            self.flatten_pairs = map(lambda p: self.pair2path(p, with_label=False), self.pairs)
+            self.flatten_pairs = [item for sublist in self.flatten_pairs for item in sublist]
 
         # load dataset structure
         persons = filter(lambda file: os.path.isdir(file),
@@ -114,8 +107,8 @@ class LFW(Dataset):
         pass
 
     @staticmethod
-    def get_image_path(basepath, name, index):
-        filename = f"{name}_{str(index).zfill(4)}"
+    def get_image_path(basepath, name, index, ext='jpg'):
+        filename = f"{name}_{str(index).zfill(4)}.{ext}"
         return os.path.join(basepath, name, filename), name
 
     def pair2path(self, pair, with_label=False):
@@ -123,6 +116,7 @@ class LFW(Dataset):
         if len(pair) == 4:
             pair_path.append(self.get_image_path(self.path, pair[0], pair[1]))
             pair_path.append(self.get_image_path(self.path, pair[2], pair[3]))
+
             if with_label:
                 pair_path.append(False)
         elif len(pair) == 3:
@@ -161,3 +155,8 @@ class LFW(Dataset):
             acc = similarity(embeddings, eval_pairs, threshold)
             acc_list.append(acc)
         return np.mean(acc_list)
+
+
+if __name__ == '__main__':
+    lfw = LFW('/home/hyh/datasets/lfw')
+    lfw.evaluation(None, None, None)

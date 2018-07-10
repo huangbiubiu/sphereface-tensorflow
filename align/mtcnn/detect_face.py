@@ -279,6 +279,26 @@ class ONet(Network):
          .fc(10, relu=False, name='conv6-3'))
 
 
+def load_model():
+    # mtcnn session
+    mtcnn_param = {}
+    mtcnn_graph = tf.Graph()
+    mtcnn_param['graph'] = mtcnn_graph
+    with mtcnn_graph.as_default():
+        gpu_options = tf.GPUOptions(allow_growth=True)
+        mtcnn_sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options,
+                                                      log_device_placement=False),
+                                graph=mtcnn_graph)
+        mtcnn_param['sess'] = mtcnn_sess
+        with mtcnn_sess.as_default():
+            pnet, rnet, onet = detect_face.create_mtcnn(mtcnn_sess, None)
+            mtcnn_graph.finalize()
+            mtcnn_param['pnet'] = pnet
+            mtcnn_param['rnet'] = rnet
+            mtcnn_param['onet'] = onet
+
+    return mtcnn_param
+
 def create_mtcnn(sess, model_path):
     if not model_path:
         model_path, _ = os.path.split(os.path.realpath(__file__))
