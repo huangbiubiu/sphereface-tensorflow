@@ -6,100 +6,86 @@ from __future__ import print_function
 
 import argparse
 import os
+import shutil
 import sys
+from multiprocessing import Pool
 
+import more_itertools as mit
 import numpy as np
 import skimage.io
 import tensorflow as tf
 
-from align.mtcnn import detect_face
-from datasets.webface import list_images
+from align.mtcnn.Aligner import Aligner
 
 
-def load_model():
-    # mtcnn session
-    mtcnn_param = {}
-    mtcnn_graph = tf.Graph()
-    mtcnn_param['graph'] = mtcnn_graph
-    with mtcnn_graph.as_default():
-        gpu_options = tf.GPUOptions(allow_growth=True)
-        mtcnn_sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options,
-                                                      log_device_placement=False),
-                                graph=mtcnn_graph)
-        mtcnn_param['sess'] = mtcnn_sess
-        with mtcnn_sess.as_default():
-            pnet, rnet, onet = detect_face.create_mtcnn(mtcnn_sess, None)
-            mtcnn_graph.finalize()
-            mtcnn_param['pnet'] = pnet
-            mtcnn_param['rnet'] = rnet
-            mtcnn_param['onet'] = onet
+class AlignClass:
+    def __init__(self, input_path, output_path, dataset_type):
+        self.input_path = input_path
+        self.output_path = output_path
 
-    return mtcnn_param
+        dataset_type = str.upper(dataset_type)
+        if dataset_type == 'TRAIN':
+            self.fail_to_detect = 'None'
+        elif dataset_type == 'EVAL':
+            self.fail_to_detect = 'RESIZE'
+        else:
+            raise ValueError(f'Not supported dataset mode: {dataset_type}')
 
+        self.aligner = None
 
-def align(image, mtcnn_param):
-    minsize = 20  # minimum size of face
-    threshold = [0.6, 0.7, 0.7]  # three steps's threshold
-    factor = 0.709  # scale factor
+    def __call__(self, class_names):
+        self.aligner = Aligner()
 
-    pnet = mtcnn_param['pnet']
-    rnet = mtcnn_param['rnet']
-    onet = mtcnn_param['onet']
+        if isinstance(class_names, str):
+            class_names = [class_names]
 
-    if len(np.shape(image)) == 2:  # expand gray scale image to RGB
-        image = np.stack((image, image, image), axis=2)
-    bounding_boxes, key_points = detect_face.detect_face(image, minsize, pnet, rnet, onet, threshold, factor)
+        for class_name in class_names:
+            if not os.path.exists(os.path.join(self.output_path, class_name)):
+                os.makedirs(os.path.join(self.output_path, class_name))
 
-    if len(bounding_boxes) > 1:
-        # select the bounding box with largest area
-        def area(bb):
-            x1, y1, x2, y2 = bb[:4]
-            return (x2 - x1) * (y2 - y1)
-
-        bounding_box, key_point = max(zip(bounding_boxes, key_points.T.tolist()), key=lambda item: area(item[0]))
-        return np.reshape(bounding_box, (1, 5)).tolist(), np.reshape(key_point, (10, 1)).tolist()
-    elif len(bounding_boxes) == 0:
-        return [], []
-
-    return bounding_boxes.tolist(), key_points.tolist()
+            input_list = os.listdir(os.path.join(self.input_path, class_name))
+            for image_file in input_list:
+                image_full_path = os.path.join(self.input_path, class_name, image_file)
+                image = skimage.io.imread(image_full_path)
+                image_transformed = self.aligner.align(image, dtype=np.uint8, fail_to_detect=self.fail_to_detect)
+                if image_transformed is None:
+                    continue
+                output_path = os.path.join(self.output_path, class_name, image_file)
+                skimage.io.imsave(output_path, image_transformed)
 
 
-def flatten(l: list) -> list:
-    return [str(item) for sublist in l for item in sublist]
-
-
-def main(args):
+def main(args, processing_num):
     output_dir = os.path.expanduser(args.output_dir)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    clear_dir(output_dir)
 
     data_dir = os.path.expanduser(args.input_dir)
-    face_classes = os.listdir(data_dir)
-    data_list = list(map(lambda cls: list_images(data_dir, cls, None), face_classes))
-    dataset = [item for sublist in data_list for item in sublist]
+    face_classes = filter(lambda d: os.path.isdir(os.path.join(data_dir, d)), os.listdir(data_dir))
 
-    mtcnn_param = load_model()
+    pool = Pool(processing_num)
+    pool.map(AlignClass(data_dir, output_dir, args.dataset_mode),
+             chunks(face_classes, processing_num))
 
-    bounding_boxes_filename = os.path.join(output_dir, 'bounding_boxes.txt')
-    fail_filename = os.path.join(output_dir, 'fail.txt')
+    pool.close()
+    pool.join()
 
-    with open(bounding_boxes_filename, "w") as text_file, open(fail_filename, "w") as fail_file:
-        count = 0
-        fail_count = 0
-        for image_path, _ in dataset:
-            image = skimage.io.imread(image_path)
-            bounding_boxes, key_points = align(image, mtcnn_param)
 
-            count += 1
-            if len(bounding_boxes) == 0:
-                fail_count += 1
-                fail_file.write(f"{image_path}\n")
-            else:
-                info = f"{image_path},{','.join(flatten(bounding_boxes))}, {','.join(flatten(key_points))}\n"
-                text_file.write(info)
+def clear_dir(folder: str):
+    for the_file in os.listdir(folder):
+        file_path = os.path.join(folder, the_file)
+        try:
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print(e)
 
-            progress(count, len(dataset),
-                     suffix=f'fail:count:total {fail_count}:{count}:{len(dataset)} Processing: {image_path}')
+
+def chunks(l, n):
+    """Yield successive n part chunks from l."""
+    return [list(c) for c in mit.divide(n, l)]
 
 
 def progress(count, total, prefix='', suffix=''):
@@ -113,8 +99,11 @@ def parse_arguments(argv):
     parser.add_argument('input_dir', type=str, help='Directory with unaligned images.')
     parser.add_argument('output_dir', type=str, help='Directory with aligned face thumbnails.')
 
+    parser.add_argument('dataset_mode', type=str, help='Directory with aligned face thumbnails.')
+
     return parser.parse_args(argv)
 
 
 if __name__ == '__main__':
-    main(parse_arguments(sys.argv[1:]))
+    tf.logging.set_verbosity(tf.logging.WARN)
+    main(parse_arguments(sys.argv[1:]), 20)

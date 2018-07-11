@@ -5,13 +5,16 @@ import tensorflow as tf
 
 from align.mtcnn import detect_face
 from tools.cp2tform_np import get_similarity_transform_for_cv2
+import skimage.transform
 
 TENSORFLOW = 0
 NUMPY = 1
 
 
 class Aligner:
-    def __init__(self, image_size, impl_ver=TENSORFLOW):
+    def __init__(self, image_size=None, impl_ver=TENSORFLOW):
+        if image_size is None:
+            image_size = [112, 96]
         self.mtcnn_param = self.load_model()
         self.coord5point = np.array([[30.2946, 51.6963],
                                      [65.5318, 51.5014],
@@ -74,17 +77,29 @@ class Aligner:
     def get_coord_points(self):
         return self.coord5point.copy()
 
-    def align(self, image, dtype=np.float32):
+    def align(self, image, fail_to_detect='ZERO', dtype=np.float32):
         """
         align image
         If failed to detect faces in input image, a image with all zero value will be returned.
-        :param image: original photo
+        :param image: original photo represented as numpy array
+        :param fail_to_detect: do what when failed to detect face in photos.
+        'RESIZE': return original image and resize to target size
+        'ZERO': return a all zero image with target size
+        'NONE': return None
         :param dtype: data type to return
         :return: transformed image
         """
         bounding_boxes, key_points = self.detect(image)
         if len(bounding_boxes) == 0:
-            return np.zeros((*self.image_size, 3)).astype(dtype)
+            fail_to_detect = str.upper(fail_to_detect)
+            if fail_to_detect == 'NONE':
+                return None
+            elif fail_to_detect == 'ZERO':
+                return np.zeros((*self.image_size, 3)).astype(dtype)
+            elif fail_to_detect == 'RESIZE':
+                return skimage.transform.resize(image, self.image_size)
+            else:
+                raise ValueError(f"Not support param fail_to_detect: {fail_to_detect}")
         key_points = np.reshape(key_points, (-1, 2), order='F')
 
         if len(np.shape(image)) == 2:  # expand gray scale photo
