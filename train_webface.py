@@ -15,12 +15,10 @@ import numpy as np
 import datasets.webface
 
 
-
-
-
 def parse_arg(argv) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_path', type=str, help='the path of dataset')
+    parser.add_argument('--dataset_path', type=str, help='the path of training dataset')
+    parser.add_argument('--eval_path', type=str, help='the path of evaluation dataset')
     parser.add_argument('--batch_size', type=int, default=128, help='the path of dataset')
 
     parser.add_argument('--fail_path', type=str, help='the path of images which failed to detect faces')
@@ -213,7 +211,8 @@ def train_and_evaluate(dataset_path,
                        cnn_param=cnn_param,
                        batch_size=batch_size,
                        sess_config=sess_config,
-                       logdir=logdir)
+                       logdir=logdir,
+                       eval_path=args.eval_path)
         if is_final_eval:
             tf.logging.info("--------Final Evaluation--------")
             tf.logging.info(f"Accuracy: {acc}")
@@ -225,14 +224,15 @@ def evaluate(dataset_path,
              cnn_param,
              batch_size,
              sess_config,
-             logdir):
+             logdir,
+             eval_path):
     """Evaluate on LFW dataset"""
     tf.reset_default_graph()
     with tf.Session(config=sess_config) as sess:
         tf.logging.info("--------START EVALUATION--------")
         tf.logging.info("loading evaluation graph")
 
-        dataset = LFW('/home/hyh/datasets/lfw')
+        dataset = LFW(eval_path)
 
         logits_op, file_name_op, step_op = build_graph(
             dataset_path=dataset_path,
@@ -272,17 +272,20 @@ def evaluate(dataset_path,
             # numpy implementation for
             # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L115
             thresholds = np.arange(-thrNum, thrNum, 1) / thrNum
-            acc = []
-            for t in thresholds:
-                acc.append(similarity(embeddings, val_pairs, t))
+
+            scores = np.array(list(map(lambda p: np.sum(embeddings[p[0][0]] * embeddings[p[1][0]]), val_pairs)))
+            labels = list(map(lambda p: p[2], val_pairs))
+
+            acc = list(map(lambda t: np.sum(labels == (scores > t)) / len(val_pairs), thresholds))
+            # acc = list(map(lambda t: similarity(embeddings, val_pairs, t), thresholds))
             return np.mean(thresholds[acc == np.max(acc)])
 
         def cos_similarity(emb: dict, eval_pairs, threshold):
             # numpy implementation for
             # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L69
-            pairs = list(map(lambda p: [emb[p[0][0]], emb[p[1][0]]], eval_pairs))
-            pairs = np.array(pairs)
-            scores = np.sum(pairs[:, 0] * pairs[:, 1], axis=1)  # inner product for each row
+            compare_result = list(map(lambda p: np.sum(emb[p[0][0]] * emb[p[1][0]]) > threshold == p[2], eval_pairs))
+            # pairs = np.array(pairs)
+            # scores = np.sum(pairs[:, 0] * pairs[:, 1], axis=1)  # inner product for each row
             """
             TODO https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L124
             confused on this implementation:
@@ -312,9 +315,10 @@ def evaluate(dataset_path,
             it is right because consine is a decrease function
             """
 
-            result = scores > threshold
-            label = np.array(list(map(lambda p: p[2], eval_pairs)))
-            return np.sum(result == label) / len(label)
+            # result = scores > threshold
+            # label = np.array(list(map(lambda p: p[2], eval_pairs)))
+            tf.logging.INFO("---------EVALUATION FINISHED.---------")
+            return np.sum(compare_result) / len(compare_result)
 
             pass
 

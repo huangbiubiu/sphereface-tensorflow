@@ -26,16 +26,18 @@ class LFW(Dataset):
                 # read image from file
                 image_file = tf.read_file(image_path)
                 image_decoded = tf.image.decode_image(image_file)
-                image_decoded.set_shape([250, 250, 3])
+                image_decoded.set_shape([112, 96, 3])
 
                 with tf.name_scope("image_alignment"):
-                    image_transformed = tf.py_func(lambda img: self.aligner.align(img), [image_decoded], tf.float32)
-                    image_transformed.set_shape([112, 96, 3])
+                    # image_transformed = tf.py_func(lambda img: self.aligner.align(img), [image_decoded], tf.float32)
+                    # image_transformed.set_shape([112, 96, 3])
+
+                    image_transformed = image_decoded
                 with tf.name_scope("image_normalization"):
-                    image_transformed = tf.cond(
-                        tf.reduce_all(tf.equal(image_transformed, tf.zeros_like(image_transformed))),
-                        lambda: tf.image.resize_images(image_decoded, image_size),
-                        lambda: image_transformed)
+                    # image_transformed = tf.cond(
+                    #     tf.reduce_all(tf.equal(image_transformed, tf.zeros_like(image_transformed))),
+                    #     lambda: tf.image.resize_images(image_decoded, image_size),
+                    #     lambda: image_transformed)
 
                     # the implementation of normalization in 1704.08063 Sec 4.1
                     image_normalized = tf.div(tf.subtract(tf.cast(image_transformed, tf.float32), 127.5), 128)

@@ -58,15 +58,18 @@ class WebFace(Dataset):
                                         lambda: tf.image.grayscale_to_rgb(image_decoded),
                                         lambda: image_decoded)
 
-                aligner = align.mtcnn.Aligner.Aligner(image_size)
+                # aligner = align.mtcnn.Aligner.Aligner(image_size)
 
                 # crop image
                 with tf.name_scope("image_alignment"):
                     # align return a all zero matrix if failed to detect faces
-                    # TODO change the py_func to TensorFlow implementation for improving speed
                     # speed improved 7x by simply remove the py_func (from 14 sec/batch to 2 sec/batch on Tesla K40c)
                     # Test on TensorFlow dataset API: ~20.2 entries/sec on h1
-                    image_transformed = tf.py_func(lambda img: aligner.align(img), [image_decoded], tf.float32)
+                    # image_transformed = tf.py_func(lambda img: aligner.align(img), [image_decoded], tf.float32)
+                    # image_transformed.set_shape([112, 96, 3])
+
+                    # read preprocessed image directly from disk
+                    image_transformed = image_decoded
                     image_transformed.set_shape([112, 96, 3])
 
                 with tf.name_scope("image_normalization"):
@@ -77,9 +80,9 @@ class WebFace(Dataset):
                 with tf.name_scope("data_augmentation"):
                     image_augmented = tf.image.random_flip_left_right(image_normalized)
 
-                image_augmented = tf.cond(tf.reduce_all(tf.equal(image_transformed, tf.zeros_like(image_transformed))),
-                                          lambda: image_transformed,
-                                          lambda: image_augmented)
+                # image_augmented = tf.cond(tf.reduce_all(tf.equal(image_transformed, tf.zeros_like(image_transformed))),
+                #                           lambda: image_transformed,
+                #                           lambda: image_augmented)
                 return image_augmented, tf.one_hot(label, depth=num_class)
 
             dataset = tf.data.Dataset.from_tensor_slices(
