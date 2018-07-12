@@ -49,7 +49,6 @@ def build_graph(dataset_path: str,
         global_step = tf.train.get_or_create_global_step(graph=sess.graph)
 
         weight_regularizer = tf.contrib.layers.l2_regularizer(0.001)
-        # weight_regularizer = None
 
         is_training = graph_type == GraphType.TRAIN
         dataset, num_class = data_loader.load_data(dataset_path, is_training, epoch_num, batch_size,
@@ -107,9 +106,7 @@ def build_graph(dataset_path: str,
         # train_op = tf.train.MomentumOptimizer(momentum=0.9,
         #                                       name='optimizer',
         #                                       learning_rate=learning_rate).minimize(loss, global_step=global_step)
-        learning_rate = tf.train.polynomial_decay(learning_rate=1e-4, global_step=global_step, decay_steps=500,
-                                                  end_learning_rate=1e-5, name="learning_rate")
-        learning_rate = 5e-5
+        learning_rate = 1e-4
         tf.summary.scalar("learning_rate", learning_rate)
         train_op = tf.train.AdamOptimizer(name='optimizer', learning_rate=learning_rate).minimize(loss,
                                                                                                   global_step=global_step)
@@ -125,6 +122,7 @@ def build_graph(dataset_path: str,
             latest_ckpt = log_dir
         if latest_ckpt is not None:
             # restore model
+            tf.logging.info(f"loading variables from {latest_ckpt}")
             saver.restore(sess, latest_ckpt)
         else:
             sess.run(tf.global_variables_initializer())
@@ -156,6 +154,9 @@ def train_and_evaluate(dataset_path,
                        logdir,
                        args,
                        eval_every_step=1000):
+    if eval_every_step < 100:
+        tf.logging.warn(f"Evaluation frequency {eval_every_step} seems too small. Is it intentional?")
+
     is_final_eval = False
     while not is_final_eval:
         data_loader = datasets.webface.WebFace()
@@ -178,7 +179,7 @@ def train_and_evaluate(dataset_path,
                             'margin': args.margin},
                 data_loader=data_loader)
             train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'), sess.graph)
-            while training_step <= eval_every_step:
+            while eval_every_step is None or training_step <= eval_every_step:
                 try:
                     training_step += 1
 
@@ -230,10 +231,10 @@ def evaluate(dataset_path,
     tf.reset_default_graph()
     with tf.Session(config=sess_config) as sess:
         tf.logging.info("--------START EVALUATION--------")
-        tf.logging.info("loading evaluation graph")
 
         dataset = LFW(eval_path)
 
+        tf.logging.info("loading evaluation graph")
         logits_op, file_name_op, step_op = build_graph(
             dataset_path=dataset_path,
             graph_type=GraphType.EVAL,
@@ -245,6 +246,7 @@ def evaluate(dataset_path,
             log_dir=logdir,
             data_param={},
             data_loader=dataset)
+        tf.logging.info("evaluation graph loaded")
 
         logits_flag = False
         batch_count = 0
@@ -267,74 +269,19 @@ def evaluate(dataset_path,
         for i in range(len(logits)):
             embeddings[str(file_name[i], encoding='utf8')] = logits[i]
 
-        # excute 10-fold evaluation
-        def get_threshold(val_pairs, similarity, embeddings, thrNum=10000):
-            # numpy implementation for
-            # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L115
-            thresholds = np.arange(-thrNum, thrNum, 1) / thrNum
-
-            scores = np.array(list(map(lambda p: np.sum(embeddings[p[0][0]] * embeddings[p[1][0]]), val_pairs)))
-            labels = list(map(lambda p: p[2], val_pairs))
-
-            acc = list(map(lambda t: np.sum(labels == (scores > t)) / len(val_pairs), thresholds))
-            # acc = list(map(lambda t: similarity(embeddings, val_pairs, t), thresholds))
-            return np.mean(thresholds[acc == np.max(acc)])
-
-        def cos_similarity(emb: dict, eval_pairs, threshold):
-            # numpy implementation for
-            # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L69
-            compare_result = list(map(lambda p: np.sum(emb[p[0][0]] * emb[p[1][0]]) > threshold == p[2], eval_pairs))
-            # pairs = np.array(pairs)
-            # scores = np.sum(pairs[:, 0] * pairs[:, 1], axis=1)  # inner product for each row
-            """
-            TODO https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L124
-            confused on this implementation:
-            
-                function accuracy = getAccuracy(scores, flags, threshold)
-                    accuracy = (length(find(scores(flags==1)>threshold)) + ...
-                    length(find(scores(flags~=1)<threshold))) / length(scores);
-                end
-            
-            since flags == 1 means same face:
-            
-                if length(strings) == 3
-                    i = i + 1;
-                    pairs(i).fileL = fullfile(folder, strings{1}, [strings{1}, num2str(str2num(strings{2}), '_%04i.jpg')]);
-                    pairs(i).fileR = fullfile(folder, strings{1}, [strings{1}, num2str(str2num(strings{3}), '_%04i.jpg')]);
-                    pairs(i).fold  = ceil(i / 600);
-                    pairs(i).flag  = 1;
-                elseif length(strings) == 4
-                    i = i + 1;
-                    pairs(i).fileL = fullfile(folder, strings{1}, [strings{1}, num2str(str2num(strings{2}), '_%04i.jpg')]);
-                    pairs(i).fileR = fullfile(folder, strings{3}, [strings{3}, num2str(str2num(strings{4}), '_%04i.jpg')]);
-                    pairs(i).fold  = ceil(i / 600);
-                    pairs(i).flag  = -1;
-                end
-            
-            why score>threshold is correct?
-            it is right because consine is a decrease function
-            """
-
-            # result = scores > threshold
-            # label = np.array(list(map(lambda p: p[2], eval_pairs)))
-            tf.logging.INFO("---------EVALUATION FINISHED.---------")
-            return np.sum(compare_result) / len(compare_result)
-
-            pass
-
-        eval_acc = dataset.evaluation(embeddings, get_threshold, cos_similarity)
+        eval_acc = dataset.evaluation(embeddings)
 
         # add to tf summary
         eval_writer = tf.summary.FileWriter(os.path.join(logdir, 'eval'), sess.graph)
         summary = tf.Summary()
         summary.value.add(tag='acc', simple_value=eval_acc)
         eval_writer.add_summary(summary, global_step=step)
-        # eval_writer.add_summary(eval_acc, global_step=step)
 
         # make sure all summaries are written to disk
         eval_writer.flush()
         eval_writer.close()
 
+        tf.logging.info("--------EVALUATION FINISHED--------")
     return eval_acc
 
 
@@ -363,7 +310,7 @@ def main(argv):
                        cnn_param={'softmax': args.softmax_type},
                        sess_config=config,
                        logdir=args.log_dir,
-                       eval_every_step=1,
+                       eval_every_step=1000,
                        args=args)
 
 

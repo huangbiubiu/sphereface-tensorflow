@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-import math
-import numpy as np
+import multiprocessing
 import os
 import random
-
 import re
+
+import numpy as np
+import tensorflow as tf
 
 from align.mtcnn.Aligner import Aligner
 from datasets.Dataset import Dataset
-import tensorflow as tf
 
 
 class LFW(Dataset):
@@ -134,7 +134,7 @@ class LFW(Dataset):
         else:
             return pair_path[0], pair_path[1]
 
-    def evaluation(self, embeddings: dict, get_threshold: callable, similarity: callable):
+    def evaluation(self, embeddings: dict):
         """
         do 10-fold evaluation :param get_threshold: a callable object with (eval_pairs, simlarity) as parameters and
         return the best threshold :param embeddings: a embeddings list for lookup. storage file name as keys and
@@ -148,15 +148,55 @@ class LFW(Dataset):
         random.shuffle(pairs)
 
         chunk_size = len(pairs) // 10
-        acc_list = []
-        for i in range(10):
-            val_pairs = pairs[i * chunk_size: (i + 1) * chunk_size]
-            eval_pairs = pairs[:i * chunk_size] + pairs[(i + 1) * chunk_size:]
+        # acc_list = []
+        # for i in range(10):
+        #     val_pairs = pairs[i * chunk_size: (i + 1) * chunk_size]
+        #     eval_pairs = pairs[:i * chunk_size] + pairs[(i + 1) * chunk_size:]
+        #
+        #     threshold = get_threshold(val_pairs, similarity, embeddings)
+        #     acc = similarity(embeddings, eval_pairs, threshold)
+        #     acc_list.append(acc)
+        pool = multiprocessing.Pool(10)
+        acc_list = pool.map(FoldEval(pairs, chunk_size, embeddings),
+                            range(10))
 
-            threshold = get_threshold(val_pairs, similarity, embeddings)
-            acc = similarity(embeddings, eval_pairs, threshold)
-            acc_list.append(acc)
         return np.mean(acc_list)
+
+
+class FoldEval:
+    def __init__(self, pairs, chunk_size, embeddings):
+        self.pairs = pairs
+        self.chunk_size = chunk_size
+
+        self.embeddings = embeddings
+
+    def __call__(self, i):
+        val_pairs = self.pairs[i * self.chunk_size: (i + 1) * self.chunk_size]
+        eval_pairs = self.pairs[:i * self.chunk_size] + self.pairs[(i + 1) * self.chunk_size:]
+
+        threshold = self.get_threshold(val_pairs, self.embeddings)
+        acc = self.cos_similarity(self.embeddings, eval_pairs, threshold)
+        return acc
+
+    def get_threshold(self, val_pairs, embeddings, thr_num=10000):
+        # numpy implementation for
+        # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L115
+        thresholds = np.arange(-thr_num, thr_num, 1) / thr_num
+
+        scores = np.array(list(map(lambda p: np.sum(embeddings[p[0][0]] * embeddings[p[1][0]]), val_pairs)))
+        labels = list(map(lambda p: p[2], val_pairs))
+
+        acc = list(map(lambda t: np.sum(labels == (scores > t)) / len(val_pairs), thresholds))
+        return np.mean(thresholds[acc == np.max(acc)])
+
+    def cos_similarity(self, emb: dict, eval_pairs, threshold):
+        # numpy implementation for
+        # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L69
+        compare_result = list(map(lambda p: np.sum(emb[p[0][0]] * emb[p[1][0]]) > threshold == p[2], eval_pairs))
+
+        return np.sum(compare_result) / len(compare_result)
+
+        pass
 
 
 if __name__ == '__main__':
