@@ -19,9 +19,6 @@ def load_data(data_dir, is_training, epoch_num, batch_size):
         if not tf.gfile.Exists(f):
             raise ValueError('Failed to find file: ' + f)
 
-    # Create a queue that produces the filenames to read.
-    # filename_queue = tf.train.string_input_producer(filenames)
-
     label_bytes = 1  # 2 for CIFAR-100
     height = 32
     width = 32
@@ -54,10 +51,10 @@ def load_data(data_dir, is_training, epoch_num, batch_size):
         # Convert label to one-hot
         label = tf.one_hot(label, 10)  # For CIFAR-10
 
-        return image, label
+        return tf.cast(image, tf.float32), label
 
-    dataset = dataset.map(decode_data).map(lambda image, label: image_preprocess(image, label))
-
+    # dataset = dataset.map(decode_data).map(lambda image, label: image_preprocess(image, label)) TODO ONLY FOR DEBUG
+    dataset = dataset.map(decode_data)
     # Shuffle, repeat, and batch the examples.
     if is_training:
         dataset = dataset.shuffle(1000).repeat(epoch_num).batch(batch_size)

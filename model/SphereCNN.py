@@ -6,6 +6,9 @@ import model.layers
 from model import GraphType
 from model.NerualNetwork import NerualNetwork
 
+# TODO remove bias as paper mentioned
+from model.loss import softmax_loss
+
 
 class SphereCNN(NerualNetwork):
     @staticmethod
@@ -15,7 +18,7 @@ class SphereCNN(NerualNetwork):
                     name: str,
                     strides=1,
                     conv_first=True,
-                    activation_name='prelu',
+                    activation_name='relu',
                     bias_regularizer=None,
                     weight_regularizer=None,
                     remove_last_activation=False):
@@ -68,7 +71,7 @@ class SphereCNN(NerualNetwork):
         return res
         pass
 
-    def inference(self, images, num_class, param):
+    def inference(self, images, num_class, label=None, param=None):
         # this implementation based on
         # https://github.com/wy1iu/sphereface/blob/master/train/code/sphereface_model.prototxt
 
@@ -82,6 +85,8 @@ class SphereCNN(NerualNetwork):
         # images = tf.image.resize_images(images, image_size)
         # images = images[:, :, :, :3]  # discard the alpha channel
         # images.set_shape((None, *image_size, 3))
+        if 'image_size' in param:
+            tf.logging.warn("param 'image_size' is deprecated")
 
         feature_map1 = self.__res_block(images, kernel_size=3, filters=64, strides=2, conv_first=True,
                                         name='conv1_1', weight_regularizer=weight_regularizer,
@@ -123,16 +128,23 @@ class SphereCNN(NerualNetwork):
             return features
 
         # output layer
-        # 4logits = tf.layers.dense(features, num_class, name="output")
+        # logits = tf.layers.dense(features, num_class, name="output")
         # logits = model.layers.a_softmax(features, num_class, m=3, global_steps=global_steps)
         if param['softmax'] == 'vanilla':
             logits = tf.layers.dense(features, num_class, name="output",
                                      kernel_regularizer=weight_regularizer,
                                      bias_regularizer=bias_regularizer)
+            return logits, softmax_loss(logits, label)
         elif param['softmax'] == 'a-softmax':
-            logits = model.layers.a_softmax(features, num_class, m=4, global_steps=global_steps)
+            lambda_base = 10000
+            gamma = 0.12
+            power = 1
+            lambda_min = 5
+            lba = tf.cast(tf.maximum(lambda_base * tf.pow(1 + gamma * tf.cast(global_steps, tf.float64), -power), lambda_min),
+                          tf.float32, name='calculate_lambda')
+            logits, loss = model.layers.Loss_ASoftmax(features, tf.argmax(label, axis=1), lba, num_class, m=4)
         else:
             raise ValueError(f"Softmax {param['softmax']} is not supported.")
         tf.summary.histogram("output", logits)
 
-        return logits
+        return logits, loss

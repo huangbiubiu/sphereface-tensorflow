@@ -3,41 +3,37 @@ import model.layers
 from model.NerualNetwork import NerualNetwork
 
 import tensorflow as tf
+import tflearn
+
+from model.loss import softmax_loss
 
 
 class NaiveCNN(NerualNetwork):
-    def inference(self, images, num_class, param):
+    def inference(self, images, num_class, label, param):
         tf.summary.image("input_image", images)
 
-        image_size = self.get_image_size(param)
-        images = tf.image.resize_images(images, image_size)
-
-        images = tf.layers.conv2d(images,
-                                  filters=32,
-                                  kernel_size=[5, 5],
-                                  padding='same',
-                                  activation=tf.nn.relu,
-                                  name='conv1')
-        images = tf.layers.max_pooling2d(images, [3, 3], [1, 1], name='pool1')
-        images = tf.layers.batch_normalization(images, name='norm1')
-
-        images = tf.layers.conv2d(images,
-                                  filters=32,
-                                  kernel_size=[3, 3], activation=tf.nn.relu,
-                                  padding='same', name='conv2')
-        images = tf.layers.max_pooling2d(images, [2, 2], [1, 1], name='pool2')
-        images = tf.layers.batch_normalization(images, name='norm2')
-
-        # features = tf.reshape(images, [images.get_shape().as_list()[0], -1], name="flatten")
-        features = tf.layers.Flatten()(images)
-        features = tf.layers.dense(features, 256, activation=tf.nn.relu, name="local1")
+        features = self.Network(images)
 
         if param['softmax'] == 'vanilla':
             logits = tf.layers.dense(features, num_class, name="output")
+            loss = softmax_loss(logits, label)
         elif param['softmax'] == 'a-softmax':
-            logits = model.layers.a_softmax(features, num_class, m=3, global_steps=param['global_steps'])
+            logits, loss = model.layers.Loss_ASoftmax(features, tf.argmax(label, axis=1), 1.0, num_class, m=2)
         else:
             raise ValueError(f"Softmax {param['softmax']} is not supported.")
         tf.summary.histogram("output", logits)
 
-        return logits
+        return logits, loss
+
+    def Network(self, data_input, training=True):
+        x = tflearn.conv_2d(data_input, 32, 3, strides=1, activation='prelu', weights_init='xavier')
+        x = tflearn.conv_2d(x, 32, 3, strides=2, activation='prelu', weights_init='xavier')
+        x = tflearn.conv_2d(x, 64, 3, strides=1, activation='prelu', weights_init='xavier')
+        x = tflearn.conv_2d(x, 64, 3, strides=2, activation='prelu', weights_init='xavier')
+        x = tflearn.conv_2d(x, 128, 3, strides=1, activation='prelu', weights_init='xavier')
+        x = tflearn.conv_2d(x, 128, 3, strides=2, activation='prelu', weights_init='xavier')
+        x = tflearn.flatten(x)
+
+        feat = tflearn.fully_connected(x, 2, weights_init='xavier')
+
+        return feat

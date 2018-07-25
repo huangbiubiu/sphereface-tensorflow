@@ -2,8 +2,8 @@
 <project version="4">
   <component name="WebServers">
     <option name="servers">
-      <webServer id="ssh://hyh@10.108.115.94:22/home/hyh/anaconda3/bin/python" name="ssh://hyh@10.108.115.94:22/home/hyh/anaconda3/bin/python">
-        <fileTransfer host="10.108.115.94" port="22" accessType="SFTP">
+      <webServer id="ssh://hyh@10.108.115.94:22/home/hyh/anaconda3/bin/python" name="ssh://hyh@10.108.115.94:22/home/hyh/anaconda3/bin/python" url="http://10.109.246.247">
+        <fileTransfer host="10.109.246.247" port="22" accessType="SFTP">
           <option name="port" value="22" />
         </fileTransfer>
       </webServer>

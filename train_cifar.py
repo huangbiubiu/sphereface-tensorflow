@@ -8,7 +8,6 @@ from datasets.cifar10 import load_data
 from model.NaiveCNN import NaiveCNN
 from model.NerualNetwork import NerualNetwork
 from model.SphereCNN import SphereCNN
-from model.loss import softmax_loss
 
 
 def parse_arg(argv) -> argparse.Namespace:
@@ -38,11 +37,12 @@ def build_graph(dataset_path: str,
         image, label = load_data(dataset_path, is_training, epoch_num, batch_size)
 
         model = cnn_model()
-        logits = model.inference(image, 10, param={**cnn_param, **{'global_steps': global_step}})
-        loss = softmax_loss(logits, label)
+        logits, loss = model.inference(image, 10, label=label, param={**cnn_param, **{'global_steps': global_step}})
         tf.summary.scalar("loss", loss)
 
-        train_op = tf.train.AdamOptimizer(name='optimizer').minimize(loss, global_step=global_step)
+        learning_rate = tf.train.exponential_decay(0.001, global_step, 10000, 0.9, staircase=True)
+        tf.summary.scalar("learning_rate", learning_rate)
+        train_op = tf.train.AdamOptimizer(name='optimizer', learning_rate=learning_rate).minimize(loss, global_step=global_step)
 
         summary_op = tf.summary.merge_all()
 

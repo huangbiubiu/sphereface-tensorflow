@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import time
 from model import GraphType
@@ -19,7 +20,9 @@ def parse_arg(argv) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, help='the path of training dataset')
     parser.add_argument('--eval_path', type=str, help='the path of evaluation dataset')
-    parser.add_argument('--batch_size', type=int, default=128, help='the path of dataset')
+
+    parser.add_argument('--batch_size', type=int, default=128, help='batch size')
+    parser.add_argument('--epoch_num', type=int, default=None, help='total training epoch number')
 
     parser.add_argument('--fail_path', type=str, help='the path of images which failed to detect faces')
     parser.add_argument('--bounding_box_path', type=str, help='the path of face bounding boxes')
@@ -48,22 +51,30 @@ def build_graph(dataset_path: str,
     with sess.graph.as_default():
         global_step = tf.train.get_or_create_global_step(graph=sess.graph)
 
-        weight_regularizer = tf.contrib.layers.l2_regularizer(0.001)
+        weight_regularizer = tf.contrib.layers.l2_regularizer(0.005)
+        # weight_regularizer = None FOR DEBUG
 
         is_training = graph_type == GraphType.TRAIN
         dataset, num_class = data_loader.load_data(dataset_path, is_training, epoch_num, batch_size,
                                                    data_param=data_param)
+        # import datasets.cifar10
+        # dataset = datasets.cifar10.load_data('/home/hyh/datasets/cifar10_data/cifar-10-batches-bin',
+        #                                      True, None, 512)
+        # num_class = 10
+
         image, label = dataset
 
         model = cnn_model()
-        logits = model.inference(image,
-                                 num_class,
-                                 param={**cnn_param,
-                                        **{'global_steps': global_step, 'image_size': 100},
-                                        'weight_regularizer': weight_regularizer,
-                                        'graph_type': graph_type})
 
         if graph_type == GraphType.EVAL:
+            logits = model.inference(image,
+                                     num_class,
+                                     label=None,
+                                     param={**cnn_param,
+                                            **{'global_steps': global_step, 'image_size': 100},
+                                            'weight_regularizer': weight_regularizer,
+                                            'graph_type': graph_type})
+
             saver = tf.train.Saver(max_to_keep=5)
 
             # initialize variables
@@ -80,39 +91,52 @@ def build_graph(dataset_path: str,
             # return normalized features and corresponding labels
             return logits / tf.reshape(tf.norm(logits, axis=1), (-1, 1)), label, global_step
 
-        base_loss = softmax_loss(logits, label)
+        logits, base_loss = model.inference(image,
+                                            num_class,
+                                            label=label,
+                                            param={**cnn_param,
+                                                   **{'global_steps': global_step, 'image_size': 100},
+                                                   'weight_regularizer': weight_regularizer,
+                                                   'graph_type': graph_type})
+
         reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         loss = tf.add_n([base_loss] + reg_losses, name="loss")
         tf.summary.scalar("loss", loss)
 
         # SGD training strategy
-        # train_op = tf.train.AdamOptimizer(name='optimizer').minimize(loss, global_step=global_step)
-        # base_lr = 1e-4
-        #
-        # def lr_decay(step):
-        #     """
-        #     calculate learning rate
-        #     same as multistep in caffe
-        #     see https://github.com/BVLC/caffe/blob/master/src/caffe/solvers/sgd_solver.cpp#L54
-        #     :param step: stepvalue
-        #     :return: learning rate for corresponding stepvalue
-        #     """
-        #     gamma = 0.1
-        #     return base_lr * math.pow(gamma, step)
-        #
-        # boundaries = [16000, 24000, 28000]
-        # values = [base_lr, *list(map(lr_decay, boundaries))]
-        # learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
-        # train_op = tf.train.MomentumOptimizer(momentum=0.9,
-        #                                       name='optimizer',
-        #                                       learning_rate=learning_rate).minimize(loss, global_step=global_step)
-        learning_rate = 1e-4
+        base_lr = 1e-4
+
+        def lr_decay(step):
+            """
+            calculate learning rate
+            same as multistep in caffe
+            see https://github.com/BVLC/caffe/blob/master/src/caffe/solvers/sgd_solver.cpp#L54
+            :param step: stepvalue
+            :return: learning rate for corresponding stepvalue
+            """
+            gamma = 0.1
+            return base_lr * math.pow(gamma, step)
+
+        boundaries = [16000, 24000, 28000]
+        values = [base_lr, *list(map(lr_decay, boundaries))]
+        learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
         tf.summary.scalar("learning_rate", learning_rate)
-        train_op = tf.train.AdamOptimizer(name='optimizer', learning_rate=learning_rate).minimize(loss,
-                                                                                                  global_step=global_step)
+        train_op = tf.train.MomentumOptimizer(momentum=0.9,
+                                              name='optimizer',
+                                              learning_rate=learning_rate).minimize(loss, global_step=global_step)
+        # learning_rate = 1e-5
+        # tf.summary.scalar("learning_rate", learning_rate)
+        # train_op = tf.train.AdamOptimizer(name='optimizer', learning_rate=learning_rate).minimize(loss,
+        #                                                                                           global_step=global_step)
 
         summary_op = tf.summary.merge_all()
 
+        # name_to_var_map = {}
+        # for var in tf.global_variables():
+        #     name = var.op.name
+        #     if 'softmax_loss/w' not in name:
+        #         name_to_var_map[name] = var
+        # saver = tf.train.Saver(name_to_var_map, max_to_keep=5)
         saver = tf.train.Saver(max_to_keep=5)
 
         # initialize variables
@@ -120,12 +144,11 @@ def build_graph(dataset_path: str,
             latest_ckpt = tf.train.latest_checkpoint(os.path.expanduser(log_dir))
         else:
             latest_ckpt = log_dir
+        sess.run(tf.global_variables_initializer())
         if latest_ckpt is not None:
             # restore model
             tf.logging.info(f"loading variables from {latest_ckpt}")
             saver.restore(sess, latest_ckpt)
-        else:
-            sess.run(tf.global_variables_initializer())
 
         # add accuracy node
         with tf.name_scope("accuracy"):
@@ -153,8 +176,9 @@ def train_and_evaluate(dataset_path,
                        sess_config,
                        logdir,
                        args,
-                       eval_every_step=1000):
-    if eval_every_step < 100:
+                       eval_every_step=1000,
+                       max_training_step=None):
+    if eval_every_step is not None and eval_every_step < 100:
         tf.logging.warn(f"Evaluation frequency {eval_every_step} seems too small. Is it intentional?")
 
     is_final_eval = False
@@ -164,48 +188,53 @@ def train_and_evaluate(dataset_path,
         training_step = 0
         tf.reset_default_graph()
         with tf.Session(config=sess_config) as sess:
-            # build training graph
-            train_op, train_acc, _, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
-                dataset_path=dataset_path,
-                graph_type=GraphType.TRAIN,
-                epoch_num=epoch_num,
-                batch_size=batch_size,
-                cnn_model=cnn_model,
-                cnn_param=cnn_param,
-                sess=sess,
-                log_dir=logdir,
-                data_param={'fail_path': args.fail_path,
-                            'bounding_boxes': args.bounding_box_path,
-                            'margin': args.margin},
-                data_loader=data_loader)
-            train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'), sess.graph)
-            while eval_every_step is None or training_step <= eval_every_step:
-                try:
-                    training_step += 1
+            with sess.graph.as_default():
+                # TODO FOR DEBUG: SET RANDOM SEED FOR STABLE RESULTS
+                tf.set_random_seed(666)
 
-                    start_time = time.time()
+                # build training graph
+                train_op, train_acc, _, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
+                    dataset_path=dataset_path,
+                    graph_type=GraphType.TRAIN,
+                    epoch_num=epoch_num,
+                    batch_size=batch_size,
+                    cnn_model=cnn_model,
+                    cnn_param=cnn_param,
+                    sess=sess,
+                    log_dir=logdir,
+                    data_param={'fail_path': args.fail_path,
+                                'bounding_boxes': args.bounding_box_path,
+                                'margin': args.margin},
+                    data_loader=data_loader)
+                train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'), sess.graph)
+                sess.graph.finalize()
+                while eval_every_step is None or training_step <= eval_every_step:
+                    try:
+                        training_step += 1
 
-                    _, loss_value, acc, step, summary, acc_summary = sess.run(
-                        [train_op, loss, train_acc, global_step, summary_op, acc_summary_op])
+                        start_time = time.time()
 
-                    end_time = time.time()
-                    duration = end_time - start_time
+                        _, loss_value, acc, step, summary, acc_summary = sess.run(
+                            [train_op, loss, train_acc, global_step, summary_op, acc_summary_op])
 
-                    # print(f'loss: {loss_value}\t acc:{acc}\t time:{duration}')
-                    tf.logging.info(f'step: %d loss: %.3f acc: %.3f time: %.3f' % (step, loss_value, acc, duration))
-                    if step % 100 == 0:
-                        train_writer.add_summary(summary, step)
-                        train_writer.add_summary(acc_summary, step)
+                        end_time = time.time()
+                        duration = end_time - start_time
 
-                        if os.path.isfile(logdir):
-                            model_save_path = os.path.dirname(logdir)
-                        else:
-                            model_save_path = logdir
-                        saver.save(sess, os.path.join(os.path.expanduser(model_save_path), 'model.ckpt'),
-                                   global_step=step)
-                except tf.errors.OutOfRangeError:  # training completed
-                    is_final_eval = True
-                    break
+                        # print(f'loss: {loss_value}\t acc:{acc}\t time:{duration}')
+                        tf.logging.info(f'step: %d loss: %.3f acc: %.3f time: %.3f' % (step, loss_value, acc, duration))
+                        if step % 100 == 0:
+                            train_writer.add_summary(summary, step)
+                            train_writer.add_summary(acc_summary, step)
+
+                            if os.path.isfile(logdir):
+                                model_save_path = os.path.dirname(logdir)
+                            else:
+                                model_save_path = logdir
+                            saver.save(sess, os.path.join(os.path.expanduser(model_save_path), 'model.ckpt'),
+                                       global_step=step)
+                    except tf.errors.OutOfRangeError:  # training completed
+                        is_final_eval = True
+                        break
 
         acc = evaluate(dataset_path=dataset_path,
                        cnn_model=cnn_model,
@@ -261,7 +290,6 @@ def evaluate(dataset_path,
                     logits = np.vstack((logits, logits_))
                     file_name = np.hstack((file_name, file_name_))
                 batch_count += 1
-                tf.logging.debug(f'Evaluating batch {batch_count}')
             except tf.errors.OutOfRangeError:
                 break
 
@@ -304,13 +332,13 @@ def main(argv):
     cnn_model = NaiveCNN if args.cnn_model == 'naive' else SphereCNN
 
     train_and_evaluate(dataset_path=args.dataset_path,
-                       epoch_num=None,
+                       epoch_num=args.epoch_num,
                        batch_size=args.batch_size,
                        cnn_model=cnn_model,
                        cnn_param={'softmax': args.softmax_type},
                        sess_config=config,
                        logdir=args.log_dir,
-                       eval_every_step=1000,
+                       eval_every_step=None,
                        args=args)
 
 
