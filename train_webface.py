@@ -104,7 +104,7 @@ def build_graph(dataset_path: str,
         tf.summary.scalar("loss", loss)
 
         # SGD training strategy
-        base_lr = 1e-4
+        base_lr = 1e-5
 
         def lr_decay(step):
             """
@@ -249,7 +249,7 @@ def train_and_evaluate(dataset_path,
             tf.logging.info('Training completed.')
 
 
-def evaluate(dataset_path,
+def evaluate(dataset_path, # TODO dataset path is useless
              cnn_model,
              cnn_param,
              batch_size,
@@ -340,6 +340,21 @@ def main(argv):
                        logdir=args.log_dir,
                        eval_every_step=None,
                        args=args)
+
+
+def debug_eval():
+    # Set GPU configuration
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+
+    evaluate('/home/hyh/projects/benchmark/data/lfw',
+             cnn_model=SphereCNN,
+             cnn_param={'softmax': 'a-softmax'},
+             batch_size=512,
+             sess_config=config,
+             logdir='/home/hyh/projects/benchmark/saved_models/webface',
+             eval_path='/home/hyh/projects/benchmark/data/lfw'
+             )
 
 
 if __name__ == '__main__':

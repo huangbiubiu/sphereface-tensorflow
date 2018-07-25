@@ -192,7 +192,7 @@ class FoldEval:
     def cos_similarity(self, emb: dict, eval_pairs, threshold):
         # numpy implementation for
         # https://github.com/wy1iu/sphereface/blob/master/test/code/evaluation.m#L69
-        compare_result = list(map(lambda p: np.sum(emb[p[0][0]] * emb[p[1][0]]) > threshold == p[2], eval_pairs))
+        compare_result = list(map(lambda p: (np.sum(emb[p[0][0]] * emb[p[1][0]]) > threshold) == p[2], eval_pairs))
 
         return np.sum(compare_result) / len(compare_result)
 
