@@ -136,12 +136,17 @@ class SphereCNN(NerualNetwork):
                                      bias_regularizer=bias_regularizer)
             return logits, softmax_loss(logits, label)
         elif param['softmax'] == 'a-softmax':
-            lambda_base = 10000
+            if 'base_lambda' in param:
+                lambda_base = param['base_lambda']
+            else:
+                lambda_base = 1000
             gamma = 0.12
             power = 1
             lambda_min = 5
-            lba = tf.cast(tf.maximum(lambda_base * tf.pow(1 + gamma * tf.cast(global_steps, tf.float64), -power), lambda_min),
-                          tf.float32, name='calculate_lambda')
+            lba = tf.cast(
+                tf.maximum(lambda_base * tf.pow(1 + gamma * tf.cast(global_steps, tf.float64), -power), lambda_min),
+                tf.float32, name='calculate_lambda')
+            tf.summary.scalar("lambda", lba)
             logits, loss = model.layers.Loss_ASoftmax(features, tf.argmax(label, axis=1), lba, num_class, m=4)
         else:
             raise ValueError(f"Softmax {param['softmax']} is not supported.")

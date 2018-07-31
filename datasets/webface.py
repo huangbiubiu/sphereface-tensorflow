@@ -22,12 +22,14 @@ class WebFace(Dataset):
         num_class = len(face_classes)
         # TODO this way to build label may raise a bug, see:
         # https://stackoverflow.com/questions/43646266/tensorflow-loss-jumps-up-after-restoring-rnn-net
-        print('-----------------LOAD INDEX-----------------------------')
+        tf.logging.info('loading dataset from disk')
         class2index = {k: v for v, k in enumerate(face_classes)}
         data_list = map(lambda cls: list_images(data_dir, cls, class2index), face_classes)
         # flat the list
         data_list = [item for sublist in data_list for item in sublist]
         random.shuffle(data_list) # the loss will not converge if not shuffle
+
+        tf.logging.info('dataset loaded')
 
         # with open('/home/hyh/tmp/dlist.pkl', 'rb') as f:
         #     data_list = pickle.load(f)
