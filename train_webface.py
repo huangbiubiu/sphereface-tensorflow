@@ -146,8 +146,10 @@ def build_graph(dataset_path: str,
             values = lr_decay_values(boundaries)
             learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
         tf.summary.scalar("learning_rate", learning_rate)
-        train_op = tf.train.AdamOptimizer(name='optimizer', learning_rate=learning_rate).minimize(loss,
-                                                                                                  global_step=global_step)
+        optimizer = tf.train.AdamOptimizer(name='optimizer', learning_rate=learning_rate)
+        train_op = optimizer.minimize(loss, global_step=global_step)
+        # gvs = optimizer.compute_gradients(loss)
+        # grads_and_vars = [(tf.clip_by_norm(grad, clip_norm), var) for grad, var in gradients]
 
         summary_op = tf.summary.merge_all()
 
@@ -328,6 +330,7 @@ def evaluate(cnn_model,
         eval_writer.flush()
         eval_writer.close()
 
+        tf.logging.info(f"Evaluation accuracy: {eval_acc}")
         tf.logging.info("--------EVALUATION FINISHED--------")
     return eval_acc
 

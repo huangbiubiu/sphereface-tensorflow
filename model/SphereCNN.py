@@ -139,7 +139,7 @@ class SphereCNN(NerualNetwork):
             if 'base_lambda' in param:
                 lambda_base = param['base_lambda']
             else:
-                lambda_base = 1000
+                lambda_base = 1000 # default number as paper
             gamma = 0.12
             power = 1
             lambda_min = 5
