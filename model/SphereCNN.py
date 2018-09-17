@@ -139,7 +139,7 @@ class SphereCNN(NerualNetwork):
             if 'base_lambda' in param:
                 lambda_base = param['base_lambda']
             else:
-                lambda_base = 1000 # default number as paper
+                lambda_base = 1000  # default number as paper
             gamma = 0.12
             power = 1
             lambda_min = 5
@@ -147,7 +147,14 @@ class SphereCNN(NerualNetwork):
                 tf.maximum(lambda_base * tf.pow(1 + gamma * tf.cast(global_steps, tf.float64), -power), lambda_min),
                 tf.float32, name='calculate_lambda')
             tf.summary.scalar("lambda", lba)
-            logits, loss = model.layers.Loss_ASoftmax(features, tf.argmax(label, axis=1), lba, num_class, m=4)
+            # logits, loss = model.layers.Loss_ASoftmax(features, tf.argmax(label, axis=1), lba, num_class, m=4)
+            margin_logits, logits = model.layers.margin_inner_product_layer(features,
+                                                                            tf.argmax(label, axis=1),
+                                                                            num_class,
+                                                                            global_steps)
+            loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.argmax(label, axis=1),
+                                                              logits=margin_logits)
+            loss = tf.reduce_mean(loss)
         else:
             raise ValueError(f"Softmax {param['softmax']} is not supported.")
         tf.summary.histogram("output", logits)
