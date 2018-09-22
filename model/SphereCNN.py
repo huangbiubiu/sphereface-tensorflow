@@ -150,9 +150,9 @@ class SphereCNN(NerualNetwork):
             # logits, loss = model.layers.Loss_ASoftmax(features, tf.argmax(label, axis=1), lba, num_class, m=4)
             margin_logits, logits = model.layers.margin_inner_product_layer(features,
                                                                             tf.argmax(label, axis=1),
-                                                                            num_class,
-                                                                            global_steps)
-            loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.argmax(label, axis=1),
+                                                                            global_steps,
+                                                                            num_output=num_class)
+            loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=label,  # accept one-hot label data
                                                               logits=margin_logits)
             loss = tf.reduce_mean(loss)
         else:
