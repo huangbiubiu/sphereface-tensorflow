@@ -105,23 +105,27 @@ def margin_inner_product_layer(x: tf.Tensor, label, iter_, num_output: int, m=4,
             phi_theta = norm_x * (sign_3 * (8 * cos_theta_quartic - 8 * cos_theta_quadratic + 1) + sign_4)
             phi_theta -= norm_x * cos_theta_y
             phi_theta = tf.scatter_nd(ordinal_y, phi_theta, tf.shape(cos_theta, out_type=tf.int64))  # (M, N)
-            phi_theta += wx
-            logits = tf.add(phi_theta, lambda_ * wx) / (1 + lambda_)
+            phi_theta += wx  # logits with margin
+
+            # normalize gradient
 
             coeff_x = sign_3 * (-24 * cos_theta_quartic + 8 * cos_theta_quadratic + 1) + sign_4
             coeff_w = sign_3 * (32 * cos_theta_cubic - 16 * cos_theta_y)
             coeff_norm = tf.sqrt(coeff_w * coeff_w + coeff_x * coeff_x)
 
-            @ops.RegisterGradient("GradNorm")
+            @ops.RegisterGradient("margin_grad_norm")
             def grad_norm(unused_op, grad):
                 diff_at_label = tf.gather_nd(grad, ordinal_y)  # extract label position derivative
                 diff_norm = diff_at_label / coeff_norm
                 return grad + tf.scatter_nd(ordinal_y, diff_norm - diff_at_label, tf.shape(grad, out_type=tf.int64))
 
-            with tf.get_default_graph().gradient_override_map({"Identity": "GradNorm"}):
-                logits_normed_grad = tf.identity(logits, name="Identity")
+            with tf.get_default_graph().gradient_override_map({"Identity": "margin_grad_norm"}):
+                phi_theta_grad = tf.identity(phi_theta, name="Identity")
 
-            return logits_normed_grad, wx
+            # balance margin function and original softmax with parameter lambda
+            logits = tf.add(phi_theta_grad, lambda_ * wx) / (1 + lambda_)
+
+            return logits, wx
 
         else:
             raise NotImplementedError(f"m={m} is not implemented.")
