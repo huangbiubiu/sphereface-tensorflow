@@ -483,7 +483,7 @@ def main(argv):
                        cnn_param={'softmax': args.softmax_type},
                        sess_config=config,
                        logdir=args.log_dir,
-                       eval_every_step=1, # TODO ONLY FOR DEBUG
+                       eval_every_step=1000,
                        max_training_step=args.max_step,
                        max_step_this_run=args.train_step,
                        args=args)
