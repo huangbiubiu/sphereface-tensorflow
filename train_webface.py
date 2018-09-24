@@ -16,6 +16,97 @@ import numpy as np
 import datasets.webface
 
 
+class Trainer:
+    def __init__(self, sess_config,
+                 dataset_path,
+                 cnn_model,
+                 cnn_param,
+                 logdir,
+                 args,
+                 epoch_num,
+                 batch_size,
+                 data_loader):
+        self.session = tf.Session(config=sess_config)
+        self.dataset_path = dataset_path
+        self.cnn_model = cnn_model
+        self.cnn_param = cnn_param
+        self.logdir = logdir
+        self.args = args
+        self.batch_size = batch_size
+        self.epoch_num = epoch_num
+        self.data_loader = data_loader
+        self.training_step = 0
+
+        self.train_writer, self.train_op, self.train_acc, self.loss, self.global_step, self.summary_op, self.saver, self.acc_summary_op = self.build_graph()
+
+    def build_graph(self):
+        sess = self.session
+        with sess.graph.as_default():
+            # TODO FOR DEBUG: SET RANDOM SEED FOR STABLE RESULTS
+            tf.set_random_seed(666)
+
+            # build training graph
+            train_op, train_acc, _, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
+                dataset_path=self.dataset_path,
+                graph_type=GraphType.TRAIN,
+                epoch_num=self.epoch_num,
+                batch_size=self.batch_size,
+                cnn_model=self.cnn_model,
+                cnn_param=self.cnn_param,
+                sess=sess,
+                log_dir=self.logdir,
+                data_param={},
+                data_loader=self.data_loader,
+                base_lr=self.args.learning_rate,
+                base_lambda=self.args.base_lambda)
+            train_writer = tf.summary.FileWriter(os.path.join(self.logdir, 'train'), sess.graph)
+            sess.graph.finalize()
+
+        return train_writer, train_op, train_acc, loss, global_step, summary_op, saver, acc_summary_op
+
+    def train_once(self, max_training_step, max_step_this_run):
+        sess = self.session
+        is_final_eval = False
+        is_training_complete = False
+
+        with sess.as_default():
+            with sess.graph.as_default():
+
+                try:
+                    self.training_step += 1
+
+                    start_time = time.time()
+
+                    _, loss_value, acc, step, summary, acc_summary = sess.run(
+                        [self.train_op, self.loss, self.train_acc, self.global_step, self.summary_op,
+                         self.acc_summary_op])
+
+                    end_time = time.time()
+                    duration = end_time - start_time
+
+                    tf.logging.info(f'step: %d loss: %.3f acc: %.3f time: %.3f' % (step, loss_value, acc, duration))
+                    if step % 100 == 0:  # save variables every 100 steps
+                        self.train_writer.add_summary(summary, step)
+                        self.train_writer.add_summary(acc_summary, step)
+
+                        if os.path.isfile(self.logdir):
+                            model_save_path = os.path.dirname(self.logdir)
+                        else:
+                            model_save_path = self.logdir
+                        self.saver.save(sess, os.path.join(os.path.expanduser(model_save_path), 'model.ckpt'),
+                                        global_step=step)
+
+                    if max_training_step is not None and step > max_training_step:
+                        is_final_eval = True
+                    if max_step_this_run is not None and self.training_step > max_step_this_run:
+                        is_final_eval = True
+                except tf.errors.OutOfRangeError:  # training completed
+                    is_final_eval = True
+                    is_training_complete = True
+
+        return is_final_eval, is_training_complete
+
+
 def parse_arg(argv) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, help='the path of training dataset')
@@ -198,66 +289,25 @@ def train_and_evaluate(dataset_path,
     if eval_every_step is not None and eval_every_step < 100:
         tf.logging.warn(f"Evaluation frequency {eval_every_step} seems too small. Is it intentional?")
 
+    data_loader = datasets.webface.WebFace()
+    trainer = Trainer(sess_config=sess_config,
+                      dataset_path=dataset_path,
+                      cnn_model=cnn_model,
+                      cnn_param=cnn_param,
+                      logdir=logdir,
+                      args=args,
+                      epoch_num=epoch_num,
+                      batch_size=batch_size,
+                      data_loader=data_loader)
+
     is_final_eval = False
 
     while not is_final_eval:
-        data_loader = datasets.webface.WebFace()
-
-        training_step = 0
-        tf.reset_default_graph()
-        with tf.Session(config=sess_config) as sess:
-            with sess.graph.as_default():
-                # TODO FOR DEBUG: SET RANDOM SEED FOR STABLE RESULTS
-                tf.set_random_seed(666)
-
-                # build training graph
-                train_op, train_acc, _, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
-                    dataset_path=dataset_path,
-                    graph_type=GraphType.TRAIN,
-                    epoch_num=epoch_num,
-                    batch_size=batch_size,
-                    cnn_model=cnn_model,
-                    cnn_param=cnn_param,
-                    sess=sess,
-                    log_dir=logdir,
-                    data_param={},
-                    data_loader=data_loader,
-                    base_lr=args.learning_rate,
-                    base_lambda=args.base_lambda)
-                train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'), sess.graph)
-                sess.graph.finalize()
-                while eval_every_step is None or training_step <= eval_every_step:
-                    try:
-                        training_step += 1
-
-                        start_time = time.time()
-
-                        _, loss_value, acc, step, summary, acc_summary = sess.run(
-                            [train_op, loss, train_acc, global_step, summary_op, acc_summary_op])
-
-                        end_time = time.time()
-                        duration = end_time - start_time
-
-                        # print(f'loss: {loss_value}\t acc:{acc}\t time:{duration}')
-                        tf.logging.info(f'step: %d loss: %.3f acc: %.3f time: %.3f' % (step, loss_value, acc, duration))
-                        if step % 100 == 0:  # save variables every 100 steps
-                            train_writer.add_summary(summary, step)
-                            train_writer.add_summary(acc_summary, step)
-
-                            if os.path.isfile(logdir):
-                                model_save_path = os.path.dirname(logdir)
-                            else:
-                                model_save_path = logdir
-                            saver.save(sess, os.path.join(os.path.expanduser(model_save_path), 'model.ckpt'),
-                                       global_step=step)
-
-                        if max_training_step is not None and step > max_training_step:
-                            is_final_eval = True
-                        if max_step_this_run is not None and training_step > max_step_this_run:
-                            is_final_eval = True
-                    except tf.errors.OutOfRangeError:  # training completed
-                        is_final_eval = True
-                        break
+        while eval_every_step is None or trainer.training_step <= eval_every_step:
+            is_final_eval, is_training_complete = trainer.train_once(max_step_this_run=max_step_this_run,
+                                                                     max_training_step=max_training_step)
+            if is_training_complete:
+                break
 
         acc = evaluate(cnn_model=cnn_model,
                        cnn_param=cnn_param,
@@ -269,6 +319,79 @@ def train_and_evaluate(dataset_path,
             tf.logging.info("--------Final Evaluation--------")
             tf.logging.info(f"Accuracy: {acc}")
             tf.logging.info('Training completed.')
+
+            break
+        pass
+
+        #
+        # while not is_final_eval:
+        #     data_loader = datasets.webface.WebFace()
+        #
+        #     training_step = 0
+        #     with tf.Session(config=sess_config) as sess:
+        #         with sess.graph.as_default():
+        #             # TODO FOR DEBUG: SET RANDOM SEED FOR STABLE RESULTS
+        #             tf.set_random_seed(666)
+        #
+        #             # build training graph
+        #             train_op, train_acc, _, loss, global_step, summary_op, saver, acc_summary_op = build_graph(
+        #                 dataset_path=dataset_path,
+        #                 graph_type=GraphType.TRAIN,
+        #                 epoch_num=epoch_num,
+        #                 batch_size=batch_size,
+        #                 cnn_model=cnn_model,
+        #                 cnn_param=cnn_param,
+        #                 sess=sess,
+        #                 log_dir=logdir,
+        #                 data_param={},
+        #                 data_loader=data_loader,
+        #                 base_lr=args.learning_rate,
+        #                 base_lambda=args.base_lambda)
+        #             train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'), sess.graph)
+        #             sess.graph.finalize()
+        #             while eval_every_step is None or training_step <= eval_every_step:
+        #                 try:
+        #                     training_step += 1
+        #
+        #                     start_time = time.time()
+        #
+        #                     _, loss_value, acc, step, summary, acc_summary = sess.run(
+        #                         [train_op, loss, train_acc, global_step, summary_op, acc_summary_op])
+        #
+        #                     end_time = time.time()
+        #                     duration = end_time - start_time
+        #
+        #                     # print(f'loss: {loss_value}\t acc:{acc}\t time:{duration}')
+        #                     tf.logging.info(f'step: %d loss: %.3f acc: %.3f time: %.3f' % (step, loss_value, acc, duration))
+        #                     if step % 100 == 0:  # save variables every 100 steps
+        #                         train_writer.add_summary(summary, step)
+        #                         train_writer.add_summary(acc_summary, step)
+        #
+        #                         if os.path.isfile(logdir):
+        #                             model_save_path = os.path.dirname(logdir)
+        #                         else:
+        #                             model_save_path = logdir
+        #                         saver.save(sess, os.path.join(os.path.expanduser(model_save_path), 'model.ckpt'),
+        #                                    global_step=step)
+        #
+        #                     if max_training_step is not None and step > max_training_step:
+        #                         is_final_eval = True
+        #                     if max_step_this_run is not None and training_step > max_step_this_run:
+        #                         is_final_eval = True
+        #                 except tf.errors.OutOfRangeError:  # training completed
+        #                     is_final_eval = True
+        #                     break
+
+        # acc = evaluate(cnn_model=cnn_model,
+        #                cnn_param=cnn_param,
+        #                batch_size=batch_size,
+        #                sess_config=sess_config,
+        #                logdir=logdir,
+        #                eval_path=args.eval_path)
+        # if is_final_eval:
+        #     tf.logging.info("--------Final Evaluation--------")
+        #     tf.logging.info(f"Accuracy: {acc}")
+        #     tf.logging.info('Training completed.')
 
 
 def evaluate(cnn_model,
@@ -360,7 +483,7 @@ def main(argv):
                        cnn_param={'softmax': args.softmax_type},
                        sess_config=config,
                        logdir=args.log_dir,
-                       eval_every_step=1000,
+                       eval_every_step=1, # TODO ONLY FOR DEBUG
                        max_training_step=args.max_step,
                        max_step_this_run=args.train_step,
                        args=args)
