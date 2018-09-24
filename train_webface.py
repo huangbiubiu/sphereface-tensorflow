@@ -303,7 +303,9 @@ def train_and_evaluate(dataset_path,
     is_final_eval = False
 
     while not is_final_eval:
-        while eval_every_step is None or trainer.training_step <= eval_every_step:
+        step_in_this_loop = 0
+        while eval_every_step is None or step_in_this_loop <= eval_every_step:
+            step_in_this_loop += 1
             is_final_eval, is_training_complete = trainer.train_once(max_step_this_run=max_step_this_run,
                                                                      max_training_step=max_training_step)
             if is_training_complete:

@@ -7,4 +7,4 @@
 
 MODEL_PATH=/home/hyh/projects/benchmark/saved_models/webface_8kstep_custombp
 mkdir -p ${MODEL_PATH}
-CUDA_VISIBLE_DEVICES=0 nohup python -u train_webface.py --dataset_path=/home/hyh/projects/benchmark/data/webface --log_dir=${MODEL_PATH} --softmax_type=a-softmax --cnn_model=a-softmax --margin=10 --batch_size=512 --max_step=8000 --learning_rate=1e-4 --eval_path=/home/hyh/projects/benchmark/data/lfw --base_lambda=1000 >> ${MODEL_PATH}/webface_train.out &
+CUDA_VISIBLE_DEVICES="" nohup python -u train_webface.py --dataset_path=/home/hyh/projects/benchmark/data/webface --log_dir=${MODEL_PATH} --softmax_type=a-softmax --cnn_model=a-softmax --margin=10 --batch_size=512 --max_step=8000 --learning_rate=1e-4 --eval_path=/home/hyh/projects/benchmark/data/lfw --base_lambda=1000 >> ${MODEL_PATH}/webface_train.out &
