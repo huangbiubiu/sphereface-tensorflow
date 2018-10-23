@@ -6,7 +6,6 @@ import model.layers
 from model import GraphType
 from model.NerualNetwork import NerualNetwork
 
-# TODO remove bias as paper mentioned
 from model.loss import softmax_loss
 
 
@@ -147,7 +146,6 @@ class SphereCNN(NerualNetwork):
                 tf.maximum(lambda_base * tf.pow(1 + gamma * tf.cast(global_steps, tf.float64), -power), lambda_min),
                 tf.float32, name='calculate_lambda')
             tf.summary.scalar("lambda", lba)
-            # logits, loss = model.layers.Loss_ASoftmax(features, tf.argmax(label, axis=1), lba, num_class, m=4)
             margin_logits, logits = model.layers.margin_inner_product_layer(features,
                                                                             tf.argmax(label, axis=1),
                                                                             global_steps,

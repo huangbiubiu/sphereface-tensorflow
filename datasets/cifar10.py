@@ -53,8 +53,7 @@ def load_data(data_dir, is_training, epoch_num, batch_size):
 
         return tf.cast(image, tf.float32), label
 
-    # dataset = dataset.map(decode_data).map(lambda image, label: image_preprocess(image, label)) TODO ONLY FOR DEBUG
-    dataset = dataset.map(decode_data)
+    dataset = dataset.map(decode_data).map(lambda image, label: image_preprocess(image, label))
     # Shuffle, repeat, and batch the examples.
     if is_training:
         dataset = dataset.shuffle(1000).repeat(epoch_num).batch(batch_size)

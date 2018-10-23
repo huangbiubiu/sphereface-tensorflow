@@ -20,8 +20,6 @@ class WebFace(Dataset):
         # construct dataset with python code
         face_classes = sorted(os.listdir(data_dir))
         num_class = len(face_classes)
-        # TODO this way to build label may raise a bug, see:
-        # https://stackoverflow.com/questions/43646266/tensorflow-loss-jumps-up-after-restoring-rnn-net
         tf.logging.info('loading dataset from disk')
         class2index = {k: v for v, k in enumerate(face_classes)}
         data_list = map(lambda cls: list_images(data_dir, cls, class2index), face_classes)
