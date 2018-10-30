@@ -2,6 +2,8 @@
 import tensorflow as tf
 import math
 
+from tensorflow.python.framework import ops
+
 
 def Loss_ASoftmax(x, y, l, num_cls, m=2, name='asoftmax'):
     '''
@@ -48,6 +50,7 @@ def Loss_ASoftmax(x, y, l, num_cls, m=2, name='asoftmax'):
                 res = 2 * tf.multiply(cos_sign, tf.square(cos_th)) - 1
             elif m == 4:
                 cos_th2 = tf.square(cos_th)
+                cos_th3 = tf.pow(cos_th, 3)
                 cos_th4 = tf.pow(cos_th, 4)
                 sign0 = tf.sign(cos_th)
                 sign3 = tf.multiply(tf.sign(2 * cos_th2 - 1), sign0)
@@ -65,6 +68,29 @@ def Loss_ASoftmax(x, y, l, num_cls, m=2, name='asoftmax'):
             comb_logits_diff = tf.add(logits,
                                       tf.scatter_nd(ordinal_y, tf.subtract(scaled_logits, sel_logits),
                                                     tf.shape(logits, out_type=tf.int64)))
+
+            ###
+            # scale grad
+            ###
+            # normalize gradient
+
+            coeff_x = sign3 * (-24 * cos_th4 + 8 * cos_th2 + 1) + sign4
+            coeff_w = sign3 * (32 * cos_th3 - 16 * cos_th)
+            coeff_norm = tf.sqrt(coeff_w * coeff_w + coeff_x * coeff_x)
+
+            @ops.RegisterGradient("margin_grad_norm")
+            def grad_norm(unused_op, grad):
+                diff_at_label = tf.gather_nd(grad, ordinal_y)  # extract label position derivative
+                diff_norm = diff_at_label / coeff_norm
+                return grad + tf.scatter_nd(ordinal_y, diff_norm - diff_at_label, tf.shape(grad, out_type=tf.int64))
+
+            with tf.get_default_graph().gradient_override_map({"Identity": "margin_grad_norm"}):
+                comb_logits_diff = tf.identity(comb_logits_diff, name="Identity")
+
+            ###
+            # scale grad completed
+            ###
+
             updated_logits = ff * logits + f * comb_logits_diff
 
             loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=updated_logits))
